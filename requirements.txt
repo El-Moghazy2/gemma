@@ -1,0 +1,20 @@
+# HealthPost - CHW Decision Support System
+# Minimal requirements for Ollama-based deployment
+
+# Web interface
+gradio>=4.0.0
+
+# Image processing
+Pillow>=10.0.0
+
+# Data handling
+numpy>=1.24.0
+
+# Audio processing (optional, for voice input)
+# soundfile>=0.12.0
+
+# === For HuggingFace backend (optional, requires MedGemma access) ===
+# torch>=2.0.0
+# transformers>=4.35.0
+# bitsandbytes>=0.41.0  # For 4-bit quantization
+# accelerate>=0.24.0

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(dir:*)",
+      "Bash(python:*)",
+      "Bash(ollama list:*)",
+      "Bash(curl:*)",
+      "WebFetch(domain:open.fda.gov)"
+    ]
+  }
+}
