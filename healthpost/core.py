@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from .agent import AgentResult, MedicalAgent
 from .config import Config, default_config
@@ -302,6 +302,8 @@ class HealthPost:
         existing_meds_photo: Optional[Any] = None,
         existing_meds_list: Optional[List[str]] = None,
         patient_age: Optional[str] = None,
+        on_progress: Optional[Callable[[str, str], None]] = None,
+        on_agent_step: Optional[Callable] = None,
     ) -> PatientVisitResult:
         """Run the agentic patient visit workflow.
 
@@ -315,6 +317,9 @@ class HealthPost:
             existing_meds_photo: Photo of current medications.
             existing_meds_list: List of current medication names.
             patient_age: Patient age description.
+            on_progress: Optional callback ``(step_name, description)``
+                for pipeline progress updates.
+            on_agent_step: Optional callback for agent reasoning steps.
 
         Returns:
             ``PatientVisitResult`` with reasoning trace.
@@ -331,7 +336,16 @@ class HealthPost:
             "use_agentic": True,
         }
 
-        final_state = self._visit_graph.invoke(visit_state)
+        if on_progress or on_agent_step:
+            from .visit_graph import build_visit_graph
+            graph = build_visit_graph(
+                self,
+                on_progress=on_progress,
+                on_agent_step=on_agent_step,
+            )
+            final_state = graph.invoke(visit_state)
+        else:
+            final_state = self._visit_graph.invoke(visit_state)
         return self._state_to_result(final_state)
 
     def _parse_agent_medications(
@@ -419,6 +433,7 @@ class HealthPost:
         images: Optional[List[Any]] = None,
         existing_meds_photo: Optional[Any] = None,
         existing_meds_list: Optional[List[str]] = None,
+        on_progress: Optional[Callable[[str, str], None]] = None,
     ) -> PatientVisitResult:
         """Run the standard (non-agentic) patient visit workflow.
 
@@ -428,6 +443,8 @@ class HealthPost:
             images: Medical images for analysis.
             existing_meds_photo: Photo of current medications.
             existing_meds_list: List of current medication names.
+            on_progress: Optional callback ``(step_name, description)``
+                for pipeline progress updates.
 
         Returns:
             ``PatientVisitResult`` with diagnosis, treatment, and
@@ -444,7 +461,12 @@ class HealthPost:
             "use_agentic": False,
         }
 
-        final_state = self._visit_graph.invoke(visit_state)
+        if on_progress:
+            from .visit_graph import build_visit_graph
+            graph = build_visit_graph(self, on_progress=on_progress)
+            final_state = graph.invoke(visit_state)
+        else:
+            final_state = self._visit_graph.invoke(visit_state)
         return self._state_to_result(final_state)
 
     def _check_referral_needed(

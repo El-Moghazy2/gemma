@@ -12,6 +12,8 @@ through cases.
 """
 
 import logging
+import queue
+import threading
 from typing import Any, List, Optional, Tuple
 
 import gradio as gr
@@ -493,6 +495,30 @@ def update_interaction_ui(
     )
 
 
+def _format_agent_trace(steps):
+    """Format progressive agent reasoning steps as Markdown.
+
+    Args:
+        steps: List of ``(step_type, content)`` tuples.
+
+    Returns:
+        Markdown string.
+    """
+    if not steps:
+        return "*Waiting for AI reasoning...*"
+    lines = ["## AI Reasoning Trace\n"]
+    icons = {
+        "thought": "Thought",
+        "action": "Action",
+        "observation": "Observation",
+        "final_answer": "Final Answer",
+    }
+    for i, (step_type, content) in enumerate(steps, 1):
+        label = icons.get(step_type, step_type.title())
+        lines.append(f"{i}. **{label}:** {content[:200]}\n")
+    return "\n".join(lines)
+
+
 def run_complete_workflow(
     audio: Any,
     symptoms_text: str,
@@ -505,8 +531,8 @@ def run_complete_workflow(
 ):
     """Run the complete patient visit workflow.
 
-    Yields a loading indicator first, then the final result.
-    Gradio natively supports generators for progressive UI updates.
+    Uses a background thread and queue so that pipeline progress and
+    agent reasoning steps stream progressively to the Gradio UI.
 
     Args:
         audio: Audio recording of symptoms.
@@ -521,7 +547,7 @@ def run_complete_workflow(
     Yields:
         Tuple of ``(main_output_markdown, reasoning_trace_markdown)``.
     """
-    yield "**Analyzing case...** This may take a moment.", "*Starting...*"
+    yield "**Starting workflow...**", "*Initializing...*"
 
     try:
         hp = get_healthpost()
@@ -549,20 +575,74 @@ def run_complete_workflow(
                 if line:
                     current_meds.append(line)
 
-        if use_agentic:
-            result = hp.patient_visit_agentic(
-                symptoms_text=final_symptoms,
-                images=images,
-                existing_meds_list=current_meds,
-                patient_age=patient_age if patient_age else None,
-            )
-        else:
-            result = hp.patient_visit(
-                symptoms_text=final_symptoms,
-                images=images,
-                existing_meds_list=current_meds,
-            )
+        progress_queue: queue.Queue = queue.Queue()
+        result_holder: List = [None, None]  # [result, error]
 
+        def on_progress(step_name, detail):
+            progress_queue.put(("progress", step_name, detail))
+
+        def on_agent_step(step):
+            progress_queue.put(("agent_step", step.step_type, step.content))
+
+        def run_pipeline():
+            try:
+                if use_agentic:
+                    result = hp.patient_visit_agentic(
+                        symptoms_text=final_symptoms,
+                        images=images,
+                        existing_meds_list=current_meds,
+                        patient_age=patient_age if patient_age else None,
+                        on_progress=on_progress,
+                        on_agent_step=on_agent_step,
+                    )
+                else:
+                    result = hp.patient_visit(
+                        symptoms_text=final_symptoms,
+                        images=images,
+                        existing_meds_list=current_meds,
+                        on_progress=on_progress,
+                    )
+                result_holder[0] = result
+            except Exception as e:
+                result_holder[1] = e
+            finally:
+                progress_queue.put(("done", None, None))
+
+        thread = threading.Thread(target=run_pipeline)
+        thread.start()
+
+        pipeline_steps: List[str] = []
+        agent_steps: List[Tuple[str, str]] = []
+
+        while True:
+            try:
+                msg = progress_queue.get(timeout=300)
+            except queue.Empty:
+                break
+            msg_type, key, detail = msg
+
+            if msg_type == "done":
+                break
+            elif msg_type == "progress":
+                pipeline_steps.append(f"**{key}**: {detail}")
+                progress_md = "\n\n".join(pipeline_steps)
+                yield progress_md, _format_agent_trace(agent_steps)
+            elif msg_type == "agent_step":
+                agent_steps.append((key, detail))
+                progress_md = (
+                    "\n\n".join(pipeline_steps)
+                    if pipeline_steps
+                    else "**Processing...**"
+                )
+                yield progress_md, _format_agent_trace(agent_steps)
+
+        thread.join()
+
+        if result_holder[1]:
+            yield f"**Error:** {result_holder[1]}", ""
+            return
+
+        result = result_holder[0]
         main_output = _format_result_markdown(result, hp)
         trace_output = _format_reasoning_trace(result)
         yield main_output, trace_output

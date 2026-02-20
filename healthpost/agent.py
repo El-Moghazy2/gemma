@@ -10,7 +10,7 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
@@ -294,13 +294,19 @@ def _parse_final_answer(content: str, result: AgentResult) -> None:
 # ── Graph builder ───────────────────────────────────────────────────
 
 
-def build_agent_graph(backend, config, tools):
+def build_agent_graph(
+    backend,
+    config,
+    tools,
+    on_step: Optional[Callable[["AgentStep"], None]] = None,
+):
     """Build and compile the LangGraph ReAct agent graph.
 
     Args:
         backend: Inference backend with ``generate_text`` method.
         config: Application config (provides ``temperature``).
         tools: List of LangChain tool objects.
+        on_step: Optional callback invoked for each reasoning step.
 
     Returns:
         Compiled LangGraph runnable.
@@ -325,7 +331,33 @@ def build_agent_graph(backend, config, tools):
             msg = AIMessage(content=response, tool_calls=tool_calls)
         else:
             msg = AIMessage(content=response)
+
+        if on_step:
+            steps = _parse_response_steps(response)
+            for step in steps:
+                logger.info(
+                    "Agent step [%s]: %s",
+                    step.step_type, step.content[:100],
+                )
+                on_step(step)
+
         return {"messages": [msg]}
+
+    def _tool_node_with_callback(state: MessagesState):
+        result = tool_node.invoke(state)
+        if on_step:
+            for msg in result.get("messages", []):
+                if isinstance(msg, ToolMessage):
+                    step = AgentStep(
+                        "observation",
+                        f"{msg.name}: {msg.content}",
+                    )
+                    logger.info(
+                        "Agent step [%s]: %s",
+                        step.step_type, step.content[:100],
+                    )
+                    on_step(step)
+        return result
 
     def should_continue(state: MessagesState):
         last = state["messages"][-1]
@@ -335,7 +367,7 @@ def build_agent_graph(backend, config, tools):
 
     graph = StateGraph(MessagesState)
     graph.add_node("agent", agent)
-    graph.add_node("tools", tool_node)
+    graph.add_node("tools", _tool_node_with_callback)
     graph.set_entry_point("agent")
     graph.add_conditional_edges(
         "agent", should_continue, {"tools": "tools", END: END},
@@ -378,6 +410,7 @@ class MedicalAgent:
         current_meds: Optional[List[str]] = None,
         patient_age: Optional[str] = None,
         images: Optional[List[Any]] = None,
+        on_step: Optional[Callable[["AgentStep"], None]] = None,
     ) -> AgentResult:
         """Run the LangGraph ReAct agent for a patient case.
 
@@ -386,13 +419,16 @@ class MedicalAgent:
             current_meds: Current medication list.
             patient_age: Patient age description.
             images: Raw images for vision analysis.
+            on_step: Optional callback invoked for each reasoning step.
 
         Returns:
             ``AgentResult`` with diagnosis, treatment, interactions,
             referral, and full reasoning trace.
         """
         tools = create_tools(self.drug_db, self.vision, images)
-        graph = build_agent_graph(self.backend, self.config, tools)
+        graph = build_agent_graph(
+            self.backend, self.config, tools, on_step=on_step,
+        )
 
         # Build patient case text
         parts = ["PATIENT CASE:"]

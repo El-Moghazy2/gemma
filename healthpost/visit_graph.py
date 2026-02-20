@@ -8,7 +8,7 @@ images, route to agentic vs linear diagnosis).
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Callable, Dict, List, Optional, TypedDict
 
 from langgraph.graph import END, StateGraph
 
@@ -45,18 +45,32 @@ class VisitState(TypedDict, total=False):
     agent_result: Any
 
 
-def build_visit_graph(hp) -> Any:
+def build_visit_graph(
+    hp,
+    on_progress: Optional[Callable[[str, str], None]] = None,
+    on_agent_step: Optional[Callable] = None,
+) -> Any:
     """Build and compile the patient visit pipeline graph.
 
     Args:
         hp: ``HealthPost`` instance whose subsystems are used by nodes.
+        on_progress: Optional callback ``(step_name, description)``
+            invoked at the start of each pipeline node.
+        on_agent_step: Optional callback for agent reasoning steps,
+            passed through to ``MedicalAgent.run()``.
 
     Returns:
         Compiled LangGraph ``StateGraph``.
     """
 
+    def _notify(step_name: str, description: str) -> None:
+        logger.info("Pipeline step: %s - %s", step_name, description)
+        if on_progress:
+            on_progress(step_name, description)
+
     def intake(state: VisitState) -> dict:
         """Transcribe audio or use text symptoms."""
+        _notify("intake", "Capturing symptoms...")
         audio = state.get("audio")
         symptoms_text = state.get("symptoms_text")
 
@@ -80,6 +94,7 @@ def build_visit_graph(hp) -> Any:
 
     def analyze_images(state: VisitState) -> dict:
         """Run vision analysis on each provided image."""
+        _notify("analyze_images", "Analyzing medical images...")
         images = state.get("images", [])
         visual_findings: List[str] = []
 
@@ -95,6 +110,7 @@ def build_visit_graph(hp) -> Any:
 
     def extract_meds(state: VisitState) -> dict:
         """Extract medications from photo and merge with text list."""
+        _notify("extract_meds", "Extracting medications...")
         existing_meds_photo = state.get("existing_meds_photo")
         existing_meds_list = state.get("existing_meds_list")
 
@@ -115,6 +131,7 @@ def build_visit_graph(hp) -> Any:
 
     def diagnose_linear(state: VisitState) -> dict:
         """Run the standard triage diagnosis pipeline."""
+        _notify("diagnose", "Generating diagnosis...")
         diagnosis, treatment = hp.triage.diagnose_and_treat(
             symptoms=state["symptoms"],
             visual_findings=state.get("visual_findings", []),
@@ -130,6 +147,7 @@ def build_visit_graph(hp) -> Any:
 
     def diagnose_agentic(state: VisitState) -> dict:
         """Run the agentic ReAct diagnosis workflow."""
+        _notify("diagnose", "Starting agentic reasoning...")
         from .agent import AgentResult
         from .triage import Diagnosis, Medication, TreatmentPlan
 
@@ -138,6 +156,7 @@ def build_visit_graph(hp) -> Any:
             current_meds=state.get("current_meds"),
             patient_age=state.get("patient_age"),
             images=state.get("images"),
+            on_step=on_agent_step,
         )
 
         diagnosis = Diagnosis(
@@ -171,6 +190,7 @@ def build_visit_graph(hp) -> Any:
 
     def check_drugs(state: VisitState) -> dict:
         """Check drug interactions between current and proposed meds."""
+        _notify("check_drugs", "Checking drug interactions...")
         current_meds = state.get("current_meds", [])
         treatment = state.get("treatment_plan")
         proposed_meds = (
@@ -197,6 +217,7 @@ def build_visit_graph(hp) -> Any:
 
     def find_alternatives(state: VisitState) -> dict:
         """Suggest alternative medications for those with interactions."""
+        _notify("alternatives", "Finding alternative medications...")
         interactions = state.get("drug_interactions", [])
         diagnosis = state.get("diagnosis")
         treatment = state.get("treatment_plan")
@@ -209,6 +230,7 @@ def build_visit_graph(hp) -> Any:
 
     def assess_safety(state: VisitState) -> dict:
         """Determine referral need and overall confidence."""
+        _notify("safety", "Assessing safety and referral needs...")
         diagnosis = state.get("diagnosis")
         treatment = state.get("treatment_plan")
         interactions = state.get("drug_interactions", [])
