@@ -1,10 +1,10 @@
 """Core HealthPost orchestrator managing the complete patient visit workflow."""
 
 import logging
-from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-from .agent import AgentResult, MedicalAgent
+from pydantic import BaseModel, Field
+
 from .config import Config, default_config
 from .drugs import DrugDatabase, DrugInteraction
 from .inference_backend import create_backend
@@ -15,25 +15,8 @@ from .voice import VoiceTranscriber
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class PatientVisitResult:
-    """Complete result from a patient visit workflow.
-
-    Attributes:
-        symptoms_text: Captured symptom description.
-        visual_findings: Findings from image analysis.
-        current_medications: Patient's existing medications.
-        diagnosis: Structured diagnosis.
-        treatment_plan: Recommended treatment.
-        drug_interactions: Detected interactions.
-        is_safe_to_proceed: ``False`` if severe interactions exist.
-        needs_referral: Whether hospital referral is indicated.
-        referral_reason: Explanation when referral is needed.
-        overall_confidence: Aggregate confidence score.
-        alternative_medications: Suggested replacements for
-            interacting drugs.
-        reasoning_trace: Agent reasoning steps (agentic mode only).
-    """
+class PatientVisitResult(BaseModel):
+    """Complete result from a patient visit workflow."""
 
     symptoms_text: str
     visual_findings: List[str]
@@ -45,15 +28,10 @@ class PatientVisitResult:
     needs_referral: bool
     referral_reason: Optional[str]
     overall_confidence: float
-    alternative_medications: Dict[str, str] = field(default_factory=dict)
-    reasoning_trace: List[str] = field(default_factory=list)
+    alternative_medications: Dict[str, str] = Field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        """Serialize the result to a plain dictionary.
-
-        Returns:
-            Nested dictionary suitable for JSON encoding.
-        """
+        """Serialize the result to a plain dictionary."""
         return {
             "symptoms": self.symptoms_text,
             "visual_findings": self.visual_findings,
@@ -96,11 +74,7 @@ class PatientVisitResult:
         }
 
     def format_for_display(self) -> str:
-        """Format the result as a plain-text summary for CHW display.
-
-        Returns:
-            Multi-line text summary.
-        """
+        """Format the result as a plain-text summary for CHW display."""
         lines: List[str] = []
 
         lines.append("=" * 50)
@@ -187,13 +161,6 @@ class PatientVisitResult:
                 "days"
             )
 
-        if self.reasoning_trace:
-            lines.append("\n" + "-" * 50)
-            lines.append("AI REASONING TRACE:")
-            lines.append("-" * 50)
-            for step in self.reasoning_trace:
-                lines.append(f"  {step}")
-
         lines.append("\n" + "=" * 50)
         return "\n".join(lines)
 
@@ -207,25 +174,15 @@ class HealthPost:
     2. **DIAGNOSE** -- Image analysis and reasoning.
     3. **PRESCRIBE** -- Treatment recommendations.
     4. **DISPENSE** -- Drug interaction safety check.
-
-    Attributes:
-        config: Application configuration.
     """
 
     def __init__(self, config: Optional[Config] = None) -> None:
-        """Initialize HealthPost with configuration.
-
-        Args:
-            config: Application configuration.  Falls back to the
-                module-level ``default_config`` if omitted.
-        """
         self.config = config or default_config
 
         self._voice: Optional[VoiceTranscriber] = None
         self._vision: Optional[MedicalVisionAnalyzer] = None
         self._drug_db: Optional[DrugDatabase] = None
         self._triage: Optional[TriageAgent] = None
-        self._agent: Optional[MedicalAgent] = None
         self._visit_graph = None
         self._initialized = False
 
@@ -252,11 +209,6 @@ class HealthPost:
 
         self._triage = TriageAgent(self.config, self._vision, backend=backend)
         logger.info("Triage agent initialized")
-
-        self._agent = MedicalAgent(
-            backend, self.config, self._drug_db, self._vision,
-        )
-        logger.info("Medical agent initialized")
 
         from .visit_graph import build_visit_graph
         self._visit_graph = build_visit_graph(self)
@@ -293,14 +245,7 @@ class HealthPost:
             self.initialize()
         return self._triage
 
-    @property
-    def agent(self) -> MedicalAgent:
-        """Lazily initialized medical agent."""
-        if self._agent is None:
-            self.initialize()
-        return self._agent
-
-    def patient_visit_agentic(
+    def patient_visit(
         self,
         audio: Optional[Any] = None,
         symptoms_text: Optional[str] = None,
@@ -309,146 +254,8 @@ class HealthPost:
         existing_meds_list: Optional[List[str]] = None,
         patient_age: Optional[str] = None,
         on_progress: Optional[Callable[[str, str], None]] = None,
-        on_agent_step: Optional[Callable] = None,
     ) -> PatientVisitResult:
-        """Run the agentic patient visit workflow.
-
-        MedGemma autonomously reasons through the case using a ReAct
-        loop.  The returned result includes a full reasoning trace.
-
-        Args:
-            audio: Audio recording of symptoms (numpy array or path).
-            symptoms_text: Text description of symptoms.
-            images: Medical images for analysis.
-            existing_meds_photo: Photo of current medications.
-            existing_meds_list: List of current medication names.
-            patient_age: Patient age description.
-            on_progress: Optional callback ``(step_name, description)``
-                for pipeline progress updates.
-            on_agent_step: Optional callback for agent reasoning steps.
-
-        Returns:
-            ``PatientVisitResult`` with reasoning trace.
-        """
-        self.initialize()
-
-        visit_state = {
-            "audio": audio,
-            "symptoms_text": symptoms_text,
-            "images": images,
-            "existing_meds_photo": existing_meds_photo,
-            "existing_meds_list": existing_meds_list,
-            "patient_age": patient_age,
-            "use_agentic": True,
-        }
-
-        if on_progress or on_agent_step:
-            from .visit_graph import build_visit_graph
-            graph = build_visit_graph(
-                self,
-                on_progress=on_progress,
-                on_agent_step=on_agent_step,
-            )
-            final_state = graph.invoke(visit_state)
-        else:
-            final_state = self._visit_graph.invoke(visit_state)
-        return self._state_to_result(final_state)
-
-    def _parse_agent_medications(
-        self, agent_result: AgentResult,
-    ) -> List[Medication]:
-        """Extract ``Medication`` objects from an agent's treatment text.
-
-        Filters out section headers and instruction lines to keep only
-        genuine medication entries.
-
-        Args:
-            agent_result: Completed agent result.
-
-        Returns:
-            List of parsed ``Medication`` objects.
-        """
-        medications: List[Medication] = []
-        skip_patterns = [
-            "plan", "medications", "instructions", "warning",
-            "referral", "evidence", "diagnosis", "supporting",
-            "differential", "hospital", "confidence",
-            "complete", "maintain", "monitor", "ensure", "continue",
-            "clean", "keep", "check", "avoid", "use bed",
-            "small frequent", "isolate", "return if",
-            # Filter model-hallucinated reasoning text
-            "i will", "i need", "i should", "the question",
-            "the patient is", "formulate", "specifically",
-            "can you tell", "ask_question", "tool",
-            # Filter patient demographics echoed by the model
-            "age", "symptoms", "location", "risk factor", "endemic",
-            "bed net", "patient info", "review patient",
-        ]
-
-        if not agent_result.treatment:
-            return medications
-
-        for line in agent_result.treatment.split("\n"):
-            line = line.strip().lstrip("- \u2022*")
-            if not line or len(line) < 3:
-                continue
-            line_lower = line.lower()
-            if any(p in line_lower for p in skip_patterns):
-                continue
-            if line.startswith(("1.", "2.", "3.", "4.")):
-                continue
-
-            if ":" in line:
-                parts = line.split(":", 1)
-                name = parts[0].strip()
-                dosage = parts[1].strip()
-                if name and dosage and len(name) < 60:
-                    medications.append(
-                        Medication(name=name, dosage=dosage),
-                    )
-            elif len(line) < 60:
-                medications.append(
-                    Medication(name=line, dosage="as directed"),
-                )
-
-        return medications
-
-    def _state_to_result(self, state: Dict[str, Any]) -> PatientVisitResult:
-        """Convert a final visit graph state to a ``PatientVisitResult``.
-
-        Args:
-            state: Final state dict from the visit graph.
-
-        Returns:
-            Populated ``PatientVisitResult``.
-        """
-        return PatientVisitResult(
-            symptoms_text=state.get("symptoms", ""),
-            visual_findings=state.get("visual_findings", []),
-            current_medications=state.get("current_meds", []),
-            diagnosis=state.get("diagnosis"),
-            treatment_plan=state.get("treatment_plan"),
-            drug_interactions=state.get("drug_interactions", []),
-            is_safe_to_proceed=state.get("is_safe_to_proceed", True),
-            alternative_medications=state.get(
-                "alternative_medications", {},
-            ),
-            needs_referral=state.get("needs_referral", False),
-            referral_reason=state.get("referral_reason"),
-            overall_confidence=state.get("overall_confidence", 0.7),
-            reasoning_trace=state.get("reasoning_trace", []),
-        )
-
-    def patient_visit(
-        self,
-        audio: Optional[Any] = None,
-        symptoms_text: Optional[str] = None,
-        images: Optional[List[Any]] = None,
-        existing_meds_photo: Optional[Any] = None,
-        existing_meds_list: Optional[List[str]] = None,
-        on_progress: Optional[Callable[[str, str], None]] = None,
-    ) -> PatientVisitResult:
-        """Run the standard (non-agentic) patient visit workflow.
+        """Run the patient visit workflow.
 
         Args:
             audio: Audio recording of symptoms.
@@ -456,6 +263,7 @@ class HealthPost:
             images: Medical images for analysis.
             existing_meds_photo: Photo of current medications.
             existing_meds_list: List of current medication names.
+            patient_age: Patient age description.
             on_progress: Optional callback ``(step_name, description)``
                 for pipeline progress updates.
 
@@ -471,7 +279,7 @@ class HealthPost:
             "images": images,
             "existing_meds_photo": existing_meds_photo,
             "existing_meds_list": existing_meds_list,
-            "use_agentic": False,
+            "patient_age": patient_age,
         }
 
         if on_progress:
@@ -482,22 +290,31 @@ class HealthPost:
             final_state = self._visit_graph.invoke(visit_state)
         return self._state_to_result(final_state)
 
+    def _state_to_result(self, state: Dict[str, Any]) -> PatientVisitResult:
+        """Convert a final visit graph state to a ``PatientVisitResult``."""
+        return PatientVisitResult(
+            symptoms_text=state.get("symptoms", ""),
+            visual_findings=state.get("visual_findings", []),
+            current_medications=state.get("current_meds", []),
+            diagnosis=state.get("diagnosis"),
+            treatment_plan=state.get("treatment_plan"),
+            drug_interactions=state.get("drug_interactions", []),
+            is_safe_to_proceed=state.get("is_safe_to_proceed", True),
+            alternative_medications=state.get(
+                "alternative_medications", {},
+            ),
+            needs_referral=state.get("needs_referral", False),
+            referral_reason=state.get("referral_reason"),
+            overall_confidence=state.get("overall_confidence", 0.7),
+        )
+
     def _check_referral_needed(
         self,
         diagnosis: Diagnosis,
         treatment: TreatmentPlan,
         interactions: List[DrugInteraction],
     ) -> tuple[bool, Optional[str]]:
-        """Determine whether the patient should be referred.
-
-        Args:
-            diagnosis: Current diagnosis.
-            treatment: Current treatment plan.
-            interactions: Detected drug interactions.
-
-        Returns:
-            Tuple of ``(needs_referral, reason_or_none)``.
-        """
+        """Determine whether the patient should be referred."""
         if diagnosis.confidence < self.config.confidence_threshold:
             return (
                 True,
@@ -535,16 +352,7 @@ class HealthPost:
         visual_findings: List[str],
         interactions: List[DrugInteraction],
     ) -> float:
-        """Calculate an aggregate confidence score.
-
-        Args:
-            diagnosis: Current diagnosis.
-            visual_findings: Image analysis findings.
-            interactions: Detected drug interactions.
-
-        Returns:
-            Confidence score clamped to ``[0.0, 1.0]``.
-        """
+        """Calculate an aggregate confidence score."""
         confidence = diagnosis.confidence
 
         if visual_findings:
@@ -561,17 +369,7 @@ class HealthPost:
         interactions: List[DrugInteraction],
         current_meds: List[str],
     ) -> Dict[str, str]:
-        """Suggest alternatives for recommended drugs with interactions.
-
-        Args:
-            diagnosis: Current diagnosis.
-            treatment: Current treatment plan.
-            interactions: Detected interactions.
-            current_meds: Patient's existing medications.
-
-        Returns:
-            Mapping of problematic drug name to suggested alternative.
-        """
+        """Suggest alternatives for recommended drugs with interactions."""
         alternatives: Dict[str, str] = {}
         recommended_drugs = {
             m.name.lower(): m.name for m in treatment.medications
@@ -601,17 +399,7 @@ class HealthPost:
         interaction: DrugInteraction,
         current_meds: List[str],
     ) -> Optional[str]:
-        """Ask the triage agent to suggest a single alternative drug.
-
-        Args:
-            condition: Patient condition being treated.
-            problematic_drug: Drug causing the interaction.
-            interaction: Details of the interaction.
-            current_meds: Patient's current medications.
-
-        Returns:
-            Alternative medication name/dosage, or ``None``.
-        """
+        """Ask the triage agent to suggest a single alternative drug."""
         current_str = (
             ", ".join(current_meds)
             if current_meds
@@ -654,47 +442,19 @@ class HealthPost:
             return None
 
     def transcribe_symptoms(self, audio: Any) -> str:
-        """Transcribe an audio recording of symptoms.
-
-        Args:
-            audio: Audio input in any supported format.
-
-        Returns:
-            Transcribed text.
-        """
+        """Transcribe an audio recording of symptoms."""
         return self.voice.transcribe(audio)
 
     def analyze_image(self, image: Any) -> List[str]:
-        """Analyze a medical image.
-
-        Args:
-            image: Image in any supported format.
-
-        Returns:
-            List of clinical finding strings.
-        """
+        """Analyze a medical image."""
         return self.vision.analyze_medical_image(image)
 
     def extract_medications(self, image: Any) -> List[str]:
-        """Extract medication names from a photo.
-
-        Args:
-            image: Photo of medications or prescriptions.
-
-        Returns:
-            List of medication name strings.
-        """
+        """Extract medication names from a photo."""
         return self.vision.extract_medications(image)
 
     def check_drug_interactions(
         self, medications: List[str],
     ) -> List[DrugInteraction]:
-        """Check for drug-drug interactions.
-
-        Args:
-            medications: Medication names to check.
-
-        Returns:
-            List of detected interactions.
-        """
+        """Check for drug-drug interactions."""
         return self.drug_db.check_interactions(medications)

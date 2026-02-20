@@ -1,11 +1,8 @@
 """Inference backend abstraction for MedGemma.
 
 Provides a unified interface for text and vision inference via
-**UnslothBackend** — uses Unsloth's ``FastVisionModel`` for ~2x faster
-inference with native MedGemma multimodal support.
-
-Legacy ``HuggingFaceBackend`` class is retained for reference but is not
-used by :func:`create_backend`.
+**HuggingFaceBackend** using plain ``transformers`` with optional
+4-bit quantization.
 """
 
 import logging
@@ -31,16 +28,7 @@ class InferenceBackend(Protocol):
         temperature: float = 0.3,
         max_tokens: int = 512,
     ) -> str:
-        """Generate a text response from a prompt.
-
-        Args:
-            prompt: Full prompt text.
-            temperature: Sampling temperature.
-            max_tokens: Maximum tokens to generate.
-
-        Returns:
-            Generated response string.
-        """
+        """Generate a text response from a prompt."""
         ...
 
     def generate_with_image(
@@ -50,17 +38,7 @@ class InferenceBackend(Protocol):
         temperature: float = 0.3,
         max_tokens: int = 512,
     ) -> str:
-        """Generate a response from an image and prompt.
-
-        Args:
-            image: PIL Image to analyze.
-            prompt: Text prompt describing the analysis task.
-            temperature: Sampling temperature.
-            max_tokens: Maximum tokens to generate.
-
-        Returns:
-            Generated response string.
-        """
+        """Generate a response from an image and prompt."""
         ...
 
 
@@ -69,9 +47,6 @@ class HuggingFaceBackend:
 
     Loads the model lazily on first call.  Supports 4-bit quantization
     on CUDA via ``bitsandbytes``.
-
-    Attributes:
-        config: Application configuration.
     """
 
     def __init__(self, config: Config) -> None:
@@ -226,153 +201,14 @@ class HuggingFaceBackend:
         return response
 
 
-class UnslothBackend:
-    """Inference backend using Unsloth's FastVisionModel.
-
-    Wraps HuggingFace models with ~2x inference speedup and provides
-    native MedGemma multimodal (vision + text) support.
-
-    Loads the model lazily on first call, similar to
-    :class:`HuggingFaceBackend`.
-    """
-
-    def __init__(self, config: Config) -> None:
-        self.config = config
-        self._model = None
-        self._tokenizer = None
-
-    @property
-    def supports_vision(self) -> bool:
-        """Unsloth FastVisionModel always supports vision."""
-        return True
-
-    def _init_model(self) -> None:
-        """Load the MedGemma model via Unsloth if not already loaded."""
-        if self._model is not None:
-            return
-
-        from unsloth import FastVisionModel
-
-        model_id = self.config.medgemma_model_id
-        logger.info("Loading Unsloth model: %s", model_id)
-
-        self._model, self._tokenizer = FastVisionModel.from_pretrained(
-            model_id,
-            load_in_4bit=self.config.use_4bit_quantization,
-        )
-        FastVisionModel.for_inference(self._model)
-
-        logger.info(
-            "Unsloth backend loaded on %s", self._model.device,
-        )
-
-    def generate_text(
-        self,
-        prompt: str,
-        temperature: float = 0.3,
-        max_tokens: int = 512,
-    ) -> str:
-        self._init_model()
-        import torch
-
-        messages = [
-            {"role": "user", "content": [{"type": "text", "text": prompt}]},
-        ]
-        inputs = self._tokenizer.apply_chat_template(
-            messages,
-            add_generation_prompt=True,
-            tokenize=True,
-            return_dict=True,
-            return_tensors="pt",
-        ).to(self._model.device)
-
-        input_len = inputs["input_ids"].shape[-1]
-        logger.info(
-            "Unsloth generating: input_tokens=%d, max_new_tokens=%d, "
-            "temperature=%.2f",
-            input_len, max_tokens, temperature,
-        )
-
-        with torch.no_grad():
-            outputs = self._model.generate(
-                **inputs,
-                max_new_tokens=max_tokens,
-                temperature=temperature,
-                do_sample=temperature > 0,
-            )
-
-        output_len = outputs[0].shape[-1] - input_len
-        response = self._tokenizer.decode(
-            outputs[0][input_len:], skip_special_tokens=True,
-        )
-        logger.info(
-            "Unsloth generation complete: output_tokens=%d, "
-            "response_length=%d",
-            output_len, len(response),
-        )
-        logger.debug("Unsloth full response: %s", response)
-        return response
-
-    def generate_with_image(
-        self,
-        image: Any,
-        prompt: str,
-        temperature: float = 0.3,
-        max_tokens: int = 512,
-    ) -> str:
-        self._init_model()
-        import torch
-
-        messages = [
-            {"role": "user", "content": [
-                {"type": "image", "image": image},
-                {"type": "text", "text": prompt},
-            ]},
-        ]
-        inputs = self._tokenizer.apply_chat_template(
-            messages,
-            add_generation_prompt=True,
-            tokenize=True,
-            return_dict=True,
-            return_tensors="pt",
-        ).to(self._model.device)
-
-        input_len = inputs["input_ids"].shape[-1]
-        logger.info(
-            "Unsloth vision generating: input_tokens=%d, "
-            "max_new_tokens=%d, temperature=%.2f",
-            input_len, max_tokens, temperature,
-        )
-
-        with torch.no_grad():
-            outputs = self._model.generate(
-                **inputs,
-                max_new_tokens=max_tokens,
-                temperature=temperature,
-                do_sample=temperature > 0,
-            )
-
-        output_len = outputs[0].shape[-1] - input_len
-        response = self._tokenizer.decode(
-            outputs[0][input_len:], skip_special_tokens=True,
-        )
-        logger.info(
-            "Unsloth vision complete: output_tokens=%d, "
-            "response_length=%d",
-            output_len, len(response),
-        )
-        logger.debug("Unsloth vision full response: %s", response)
-        return response
-
-
 def create_backend(config: Config) -> InferenceBackend:
-    """Create the Unsloth inference backend.
+    """Create the HuggingFace inference backend.
 
     Args:
         config: Application configuration.
 
     Returns:
-        An :class:`UnslothBackend` instance.
+        A :class:`HuggingFaceBackend` instance.
     """
-    logger.info("Using Unsloth backend: %s", config.medgemma_model_id)
-    return UnslothBackend(config)
+    logger.info("Using HuggingFace backend: %s", config.medgemma_model_id)
+    return HuggingFaceBackend(config)

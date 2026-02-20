@@ -1,5 +1,5 @@
 # HealthPost - CHW Decision Support System
-# Requires MedGemma 1.5 via HuggingFace
+# Requires MedGemma via HuggingFace
 
 # Core ML
 torch>=2.0.0
@@ -8,7 +8,9 @@ transformers>=4.35.0
 # Quantization & device mapping
 bitsandbytes>=0.41.0
 accelerate>=0.24.0
-unsloth>=2024.8
+
+# Data validation
+pydantic>=2.0.0
 
 # Web interface
 gradio>=4.0.0

@@ -9,7 +9,7 @@ class Config:
     """Application-wide configuration for HealthPost.
 
     Attributes:
-        medgemma_model_id: HuggingFace model ID for MedGemma 1.5.
+        medgemma_model_id: HuggingFace model ID for MedGemma.
         medasr_model_id: HuggingFace model ID for MedASR.
         use_4bit_quantization: Whether to quantize models to 4-bit.
         device: Compute device (``"auto"``, ``"cuda"``, or ``"cpu"``).
@@ -21,7 +21,7 @@ class Config:
         sample_rate: Expected audio sample rate in Hz.
     """
 
-    medgemma_model_id: str = "google/medgemma-1.5-4b-it"
+    medgemma_model_id: str = "google/medgemma-4b-it"
     medasr_model_id: str = "google/medasr"
 
     use_4bit_quantization: bool = True
@@ -49,11 +49,7 @@ class Config:
         self._check_huggingface()
 
     def _check_huggingface(self) -> None:
-        """Verify that core ML packages are importable.
-
-        Unsloth manages its own transformer/torch dependencies, so this
-        check is intentionally skipped.
-        """
+        """Verify that core ML packages are importable."""
         return
 
 

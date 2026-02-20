@@ -5,22 +5,15 @@ interactions from DrugBank, KEGG, etc.).
 """
 
 import logging
-from dataclasses import dataclass
 from typing import List, Set, Tuple
+
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class DrugInteraction:
-    """A drug-drug interaction record.
-
-    Attributes:
-        drugs: The two drugs involved.
-        severity: One of ``"mild"``, ``"moderate"``, ``"severe"``.
-        description: Clinical description of the interaction.
-        recommendation: Recommended action.
-    """
+class DrugInteraction(BaseModel):
+    """A drug-drug interaction record."""
 
     drugs: Tuple[str, str]
     severity: str
@@ -38,11 +31,7 @@ class DrugDatabase:
         self._ddinter_client = None
 
     def _get_ddinter_client(self):
-        """Return the DDInter API client, lazily initialized.
-
-        Returns:
-            ``DDInterClient`` instance, or ``None`` if unavailable.
-        """
+        """Return the DDInter API client, lazily initialized."""
         if self._ddinter_client is None:
             try:
                 from .ddinter_api import DDInterClient

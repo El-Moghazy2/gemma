@@ -5,10 +5,7 @@ Supports the complete patient visit workflow:
 1. **INTAKE** -- Voice/text symptom capture (MedASR).
 2. **DIAGNOSE** -- Image analysis (MedGemma Vision).
 3. **PRESCRIBE** -- AI-generated treatment (MedGemma Text).
-4. **DISPENSE** -- Drug safety check (Local DB + DDInter).
-
-Features an agentic workflow where MedGemma autonomously reasons
-through cases.
+4. **DISPENSE** -- Drug safety check (DDInter).
 """
 
 import logging
@@ -36,17 +33,10 @@ def get_healthpost() -> HealthPost:
 
 
 def _get_backend_badge(component: str) -> str:
-    """Return a Markdown badge showing the active model for *component*.
-
-    Args:
-        component: One of ``"triage"``, ``"vision"``, or ``"voice"``.
-
-    Returns:
-        Markdown inline-code badge string.
-    """
+    """Return a Markdown badge showing the active model for *component*."""
     badges = {
-        "triage": "`MedGemma 1.5 Text`",
-        "vision": "`MedGemma 1.5 Vision`",
+        "triage": "`MedGemma Text`",
+        "vision": "`MedGemma Vision`",
         "voice": "`MedASR`",
     }
     return badges.get(component, "`Unknown`")
@@ -99,14 +89,7 @@ DEMO_SCENARIOS = {
 def load_demo_scenario(
     scenario_name: str,
 ) -> Tuple[str, str, str, str]:
-    """Load a demo scenario into the Quick Workflow form fields.
-
-    Args:
-        scenario_name: Key into ``DEMO_SCENARIOS``.
-
-    Returns:
-        Tuple of ``(symptoms, age, meds, image_type)``.
-    """
+    """Load a demo scenario into the Quick Workflow form fields."""
     if scenario_name not in DEMO_SCENARIOS:
         return "", "", "", "Skin/Rash"
     s = DEMO_SCENARIOS[scenario_name]
@@ -114,14 +97,7 @@ def load_demo_scenario(
 
 
 def transcribe_audio(audio: Any) -> Tuple[str, str]:
-    """Transcribe an audio recording of symptoms.
-
-    Args:
-        audio: Gradio audio component value.
-
-    Returns:
-        Tuple of ``(transcribed_text, source_label_markdown)``.
-    """
+    """Transcribe an audio recording of symptoms."""
     if audio is None:
         return "", ""
 
@@ -136,15 +112,7 @@ def transcribe_audio(audio: Any) -> Tuple[str, str]:
 
 
 def analyze_medical_image(image: Any, image_type: str) -> str:
-    """Analyze a medical image and return formatted findings.
-
-    Args:
-        image: Gradio image component value.
-        image_type: Category (``"Skin/Rash"``, ``"Wound"``, etc.).
-
-    Returns:
-        Markdown-formatted analysis text.
-    """
+    """Analyze a medical image and return formatted findings."""
     if image is None:
         return ""
 
@@ -182,14 +150,6 @@ def generate_diagnosis(
     """Generate a diagnosis and treatment plan.
 
     Yields a loading indicator first, then the final result.
-
-    Args:
-        symptoms_text: Symptom description.
-        visual_findings: Visual findings text (newline-separated).
-        patient_age: Patient age string.
-
-    Yields:
-        Tuple of ``(diagnosis_md, treatment_md, referral_md, trace_md)``.
     """
     yield "**Analyzing...**", "", "", "*Starting...*"
 
@@ -268,14 +228,7 @@ def generate_diagnosis(
 
 
 def extract_medications_from_photo(image: Any) -> str:
-    """Extract medication names from a photo of labels.
-
-    Args:
-        image: Gradio image component value.
-
-    Returns:
-        Newline-separated medication names.
-    """
+    """Extract medication names from a photo of labels."""
     if image is None:
         return ""
 
@@ -292,16 +245,7 @@ def check_drug_interactions(
     current_meds_text: str,
     proposed_meds_text: str,
 ) -> Tuple[str, List[Any], List[str]]:
-    """Check for drug-drug interactions.
-
-    Args:
-        current_meds_text: Current medications (one per line).
-        proposed_meds_text: Proposed medications (one per line).
-
-    Returns:
-        Tuple of ``(result_markdown, interactions_list,
-        dropdown_choices)``.
-    """
+    """Check for drug-drug interactions."""
     if not current_meds_text.strip() and not proposed_meds_text.strip():
         return "Enter medications to check", [], []
 
@@ -382,18 +326,7 @@ def get_alternative_for_interaction(
     current_meds_text: str,
     proposed_meds_text: str,
 ) -> str:
-    """Suggest an alternative medication for a selected interaction.
-
-    Args:
-        selected_interaction: Dropdown value identifying the
-            interaction.
-        interactions_list: Full list of interaction objects.
-        current_meds_text: Current medications text.
-        proposed_meds_text: Proposed medications text.
-
-    Returns:
-        Markdown-formatted alternative suggestion.
-    """
+    """Suggest an alternative medication for a selected interaction."""
     if not selected_interaction or not interactions_list:
         return ""
 
@@ -474,16 +407,7 @@ def update_interaction_ui(
     interactions_list: List[Any],
     dropdown_choices: List[str],
 ):
-    """Update visibility of the interaction-resolution UI components.
-
-    Args:
-        interaction_result: Markdown result text (unused).
-        interactions_list: Detected interaction objects.
-        dropdown_choices: Choices for the interaction selector.
-
-    Returns:
-        Tuple of Gradio updates for ``(selector, button, output)``.
-    """
+    """Update visibility of the interaction-resolution UI components."""
     has_interactions = len(interactions_list) > 0
     return (
         gr.update(
@@ -495,30 +419,6 @@ def update_interaction_ui(
     )
 
 
-def _format_agent_trace(steps):
-    """Format progressive agent reasoning steps as Markdown.
-
-    Args:
-        steps: List of ``(step_type, content)`` tuples.
-
-    Returns:
-        Markdown string.
-    """
-    if not steps:
-        return "*Waiting for AI reasoning...*"
-    lines = ["## AI Reasoning Trace\n"]
-    icons = {
-        "thought": "Thought",
-        "action": "Action",
-        "observation": "Observation",
-        "final_answer": "Final Answer",
-    }
-    for i, (step_type, content) in enumerate(steps, 1):
-        label = icons.get(step_type, step_type.title())
-        lines.append(f"{i}. **{label}:** {content}\n")
-    return "\n".join(lines)
-
-
 def run_complete_workflow(
     audio: Any,
     symptoms_text: str,
@@ -527,27 +427,13 @@ def run_complete_workflow(
     patient_age: str,
     current_meds_photo: Any,
     current_meds_text: str,
-    use_agentic: bool,
 ):
     """Run the complete patient visit workflow.
 
-    Uses a background thread and queue so that pipeline progress and
-    agent reasoning steps stream progressively to the Gradio UI.
-
-    Args:
-        audio: Audio recording of symptoms.
-        symptoms_text: Text symptom description.
-        medical_image: Medical image.
-        image_type: Image category string.
-        patient_age: Patient age.
-        current_meds_photo: Photo of current medications.
-        current_meds_text: Text list of current medications.
-        use_agentic: Whether to use the agentic workflow.
-
-    Yields:
-        Tuple of ``(main_output_markdown, reasoning_trace_markdown)``.
+    Uses a background thread and queue so that pipeline progress
+    streams progressively to the Gradio UI.
     """
-    yield "**Starting workflow...**", "*Initializing...*"
+    yield "**Starting workflow...**"
 
     try:
         hp = get_healthpost()
@@ -561,7 +447,7 @@ def run_complete_workflow(
                 final_symptoms = transcribed
 
         if not final_symptoms:
-            yield "Please provide symptoms (voice or text)", ""
+            yield "Please provide symptoms (voice or text)"
             return
 
         images = [medical_image] if medical_image is not None else []
@@ -581,27 +467,15 @@ def run_complete_workflow(
         def on_progress(step_name, detail):
             progress_queue.put(("progress", step_name, detail))
 
-        def on_agent_step(step):
-            progress_queue.put(("agent_step", step.step_type, step.content))
-
         def run_pipeline():
             try:
-                if use_agentic:
-                    result = hp.patient_visit_agentic(
-                        symptoms_text=final_symptoms,
-                        images=images,
-                        existing_meds_list=current_meds,
-                        patient_age=patient_age if patient_age else None,
-                        on_progress=on_progress,
-                        on_agent_step=on_agent_step,
-                    )
-                else:
-                    result = hp.patient_visit(
-                        symptoms_text=final_symptoms,
-                        images=images,
-                        existing_meds_list=current_meds,
-                        on_progress=on_progress,
-                    )
+                result = hp.patient_visit(
+                    symptoms_text=final_symptoms,
+                    images=images,
+                    existing_meds_list=current_meds,
+                    patient_age=patient_age if patient_age else None,
+                    on_progress=on_progress,
+                )
                 result_holder[0] = result
             except Exception as e:
                 result_holder[1] = e
@@ -612,7 +486,6 @@ def run_complete_workflow(
         thread.start()
 
         pipeline_steps: List[str] = []
-        agent_steps: List[Tuple[str, str]] = []
 
         while True:
             try:
@@ -626,41 +499,24 @@ def run_complete_workflow(
             elif msg_type == "progress":
                 pipeline_steps.append(f"**{key}**: {detail}")
                 progress_md = "\n\n".join(pipeline_steps)
-                yield progress_md, _format_agent_trace(agent_steps)
-            elif msg_type == "agent_step":
-                agent_steps.append((key, detail))
-                progress_md = (
-                    "\n\n".join(pipeline_steps)
-                    if pipeline_steps
-                    else "**Processing...**"
-                )
-                yield progress_md, _format_agent_trace(agent_steps)
+                yield progress_md
 
         thread.join()
 
         if result_holder[1]:
-            yield f"**Error:** {result_holder[1]}", ""
+            yield f"**Error:** {result_holder[1]}"
             return
 
         result = result_holder[0]
         main_output = _format_result_markdown(result, hp)
-        trace_output = _format_reasoning_trace(result)
-        yield main_output, trace_output
+        yield main_output
     except Exception as e:
         logger.error("Workflow error: %s", e)
-        yield f"**Error:** {e}", ""
+        yield f"**Error:** {e}"
 
 
 def _format_result_markdown(result, hp) -> str:
-    """Format a ``PatientVisitResult`` as rich Markdown.
-
-    Args:
-        result: Completed patient visit result.
-        hp: HealthPost instance (for badge generation).
-
-    Returns:
-        Markdown string.
-    """
+    """Format a ``PatientVisitResult`` as rich Markdown."""
     lines: List[str] = []
 
     triage_badge = _get_backend_badge("triage")
@@ -763,24 +619,6 @@ def _format_result_markdown(result, hp) -> str:
     return "\n".join(lines)
 
 
-def _format_reasoning_trace(result) -> str:
-    """Format the reasoning trace as Markdown.
-
-    Args:
-        result: Completed patient visit result.
-
-    Returns:
-        Markdown string, or a placeholder if no trace is present.
-    """
-    if not result.reasoning_trace:
-        return "*Standard workflow used \u2014 no reasoning trace.*"
-
-    lines = ["## AI Reasoning Trace\n"]
-    for i, step in enumerate(result.reasoning_trace, 1):
-        lines.append(f"{i}. {step}\n")
-    return "\n".join(lines)
-
-
 def create_interface() -> gr.Blocks:
     """Build and return the Gradio ``Blocks`` application."""
     with gr.Blocks(
@@ -790,9 +628,9 @@ def create_interface() -> gr.Blocks:
 
         gr.Markdown(
             "# HealthPost\n"
-            "### Agentic CHW Decision Support with MedGemma\n\n"
-            "AI agent that autonomously guides Community Health Workers "
-            "through **diagnosis, treatment, and drug safety** using "
+            "### CHW Decision Support with MedGemma\n\n"
+            "AI-powered clinical workflow for Community Health Workers: "
+            "**diagnosis, treatment, and drug safety** using "
             "MedGemma Vision + Text + MedASR.\n\n---"
         )
 
@@ -861,15 +699,6 @@ def create_interface() -> gr.Blocks:
                             lines=3,
                         )
 
-                with gr.Row():
-                    quick_agentic = gr.Checkbox(
-                        label=(
-                            "Enable Agentic Workflow "
-                            "(MedGemma reasons autonomously)"
-                        ),
-                        value=True,
-                    )
-
                 quick_run_btn = gr.Button(
                     "Run Complete Workflow",
                     variant="primary",
@@ -879,16 +708,6 @@ def create_interface() -> gr.Blocks:
                 quick_output = gr.Markdown(
                     label="Complete Visit Summary",
                 )
-
-                with gr.Accordion("AI Reasoning Trace", open=False):
-                    quick_trace = gr.Markdown(
-                        label="Reasoning Trace",
-                        value=(
-                            "*Run a workflow to see the AI "
-                            "reasoning trace*"
-                        ),
-                        min_height=400,
-                    )
 
                 for name, btn in demo_btns.items():
                     btn.click(
@@ -905,9 +724,8 @@ def create_interface() -> gr.Blocks:
                         quick_audio, quick_symptoms, quick_image,
                         quick_image_type, quick_age,
                         quick_meds_photo, quick_meds_text,
-                        quick_agentic,
                     ],
-                    outputs=[quick_output, quick_trace],
+                    outputs=[quick_output],
                 )
 
             with gr.TabItem("Step-by-Step"):
@@ -1003,10 +821,10 @@ def create_interface() -> gr.Blocks:
                         )
 
                     with gr.Accordion(
-                        "AI Reasoning Trace", open=False,
+                        "Pipeline Trace", open=False,
                     ):
                         prescribe_trace = gr.Markdown(
-                            label="Reasoning Trace",
+                            label="Pipeline Trace",
                             value="*Run diagnosis to see trace*",
                             min_height=400,
                         )
@@ -1235,7 +1053,7 @@ def create_interface() -> gr.Blocks:
             with gr.TabItem("About"):
                 gr.Markdown(
                     "## About HealthPost\n\n"
-                    "**HealthPost** is an agentic decision support tool "
+                    "**HealthPost** is a decision support tool "
                     "for Community Health Workers (CHWs) in low-resource "
                     "settings, powered by Google's MedGemma family of "
                     "medical AI models.\n\n"
@@ -1248,38 +1066,30 @@ def create_interface() -> gr.Blocks:
                     "skin conditions, wounds, eyes |\n"
                     "| Diagnosis & Treatment | `MedGemma Text` | "
                     "AI-assisted diagnosis with confidence scores |\n"
-                    "| Agentic Reasoning | `MedGemma Text` | Autonomous "
-                    "step-by-step clinical reasoning |\n"
-                    "| Drug Safety | `Local DB + DDInter` | Offline "
-                    "drug interaction checking (50+ drugs, 40+ "
-                    "interactions) |\n"
+                    "| Drug Safety | `DDInter API` | Drug interaction "
+                    "checking (236K+ interactions) |\n"
                     "| Referral Guidance | `Rule-based` | Know when to "
                     "refer to hospital |\n\n"
-                    "### Agentic Architecture\n\n"
-                    "HealthPost uses a **ReAct (Reason + Act)** agent "
-                    "loop:\n\n"
-                    "1. MedGemma receives the patient case\n"
-                    "2. It **reasons** about what information is needed "
-                    "(`[THOUGHT]`)\n"
-                    "3. It **acts** by calling tools like "
-                    "`analyze_skin`, `check_interactions` "
-                    "(`[ACTION]`)\n"
-                    "4. It reviews observations and decides next steps "
-                    "(`[OBSERVATION]`)\n"
-                    "5. After gathering enough information, it provides "
-                    "a complete assessment (`[FINAL_ANSWER]`)\n\n"
-                    "This transparent reasoning builds CHW trust \u2014 "
-                    "they can see *why* the AI made each decision.\n\n"
+                    "### Architecture\n\n"
+                    "HealthPost uses a **LangGraph pipeline** with "
+                    "structured JSON output:\n\n"
+                    "1. **Intake** \u2014 Capture symptoms via voice or text\n"
+                    "2. **Image Analysis** \u2014 Analyze medical photos with MedGemma Vision\n"
+                    "3. **Diagnosis** \u2014 JSON-structured clinical assessment via MedGemma\n"
+                    "4. **Drug Safety** \u2014 Check interactions via DDInter API\n"
+                    "5. **Safety Assessment** \u2014 Determine referral needs\n\n"
+                    "All LLM outputs are parsed as structured JSON using "
+                    "Pydantic models for reliability.\n\n"
                     "### Technical Details\n\n"
                     "- **4-bit quantization**: ~4GB VRAM, runs on "
                     "consumer GPU / Kaggle T4\n"
-                    "- **Offline drug database**: SQLite with 50+ WHO "
-                    "Essential Medicines, 40+ interactions\n"
-                    "- **Edge-ready**: No internet required after model "
-                    "download\n"
+                    "- **DDInter API**: 236K+ drug interactions from "
+                    "DrugBank, KEGG, etc.\n"
+                    "- **Pydantic models**: Structured, validated data "
+                    "throughout the pipeline\n"
                     "- **Gradio UI**: Mobile browser compatible\n"
-                    "- **MedGemma 1.5**: Latest medical AI model with "
-                    "improved accuracy\n\n"
+                    "- **MedGemma**: Medical AI model with "
+                    "multimodal support\n\n"
                     "### Safety Notice\n\n"
                     "This tool is designed to **support** clinical "
                     "decision-making, not replace it. Always use "

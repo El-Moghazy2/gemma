@@ -2,7 +2,7 @@
 
 Replaces the linear orchestration in ``core.py`` with a ``StateGraph``
 that supports conditional routing (e.g. skip image analysis when no
-images, route to agentic vs linear diagnosis).
+images).
 """
 
 from __future__ import annotations
@@ -25,7 +25,6 @@ class VisitState(TypedDict, total=False):
     existing_meds_photo: Optional[Any]
     existing_meds_list: Optional[List[str]]
     patient_age: Optional[str]
-    use_agentic: bool
 
     # Pipeline
     symptoms: str
@@ -39,16 +38,11 @@ class VisitState(TypedDict, total=False):
     needs_referral: bool
     referral_reason: Optional[str]
     overall_confidence: float
-    reasoning_trace: List[str]
-
-    # Agentic result (intermediate)
-    agent_result: Any
 
 
 def build_visit_graph(
     hp,
     on_progress: Optional[Callable[[str, str], None]] = None,
-    on_agent_step: Optional[Callable] = None,
 ) -> Any:
     """Build and compile the patient visit pipeline graph.
 
@@ -56,8 +50,6 @@ def build_visit_graph(
         hp: ``HealthPost`` instance whose subsystems are used by nodes.
         on_progress: Optional callback ``(step_name, description)``
             invoked at the start of each pipeline node.
-        on_agent_step: Optional callback for agent reasoning steps,
-            passed through to ``MedicalAgent.run()``.
 
     Returns:
         Compiled LangGraph ``StateGraph``.
@@ -89,7 +81,6 @@ def build_visit_graph(
             "current_meds": [],
             "drug_interactions": [],
             "alternative_medications": {},
-            "reasoning_trace": [],
         }
 
     def analyze_images(state: VisitState) -> dict:
@@ -129,12 +120,14 @@ def build_visit_graph(
         logger.info("Current medications: %s", current_meds)
         return {"current_meds": current_meds}
 
-    def diagnose_linear(state: VisitState) -> dict:
-        """Run the standard triage diagnosis pipeline."""
+    def diagnose(state: VisitState) -> dict:
+        """Run the triage diagnosis pipeline."""
         _notify("diagnose", "Generating diagnosis...")
         diagnosis, treatment = hp.triage.diagnose_and_treat(
             symptoms=state["symptoms"],
             visual_findings=state.get("visual_findings", []),
+            patient_age=state.get("patient_age"),
+            current_medications=state.get("current_meds"),
         )
         logger.info(
             "Diagnosis: %s (%.0f%%)",
@@ -143,50 +136,6 @@ def build_visit_graph(
         return {
             "diagnosis": diagnosis,
             "treatment_plan": treatment,
-        }
-
-    def diagnose_agentic(state: VisitState) -> dict:
-        """Run the agentic ReAct diagnosis workflow."""
-        _notify("diagnose", "Starting agentic reasoning...")
-        from .agent import AgentResult
-        from .triage import Diagnosis, Medication, TreatmentPlan
-
-        agent_result = hp.agent.run(
-            symptoms=state["symptoms"],
-            current_meds=state.get("current_meds"),
-            patient_age=state.get("patient_age"),
-            images=state.get("images"),
-            on_step=on_agent_step,
-        )
-
-        diagnosis = Diagnosis(
-            condition=agent_result.diagnosis or "Undetermined",
-            confidence=agent_result.confidence,
-            supporting_evidence=[
-                f"Symptoms: {state['symptoms'][:100]}",
-            ],
-            known_symptoms=agent_result.known_symptoms,
-        )
-
-        medications = hp._parse_agent_medications(agent_result)
-        needs_referral = "yes" in (agent_result.referral or "").lower()
-        referral_reason = agent_result.referral if needs_referral else None
-
-        treatment = TreatmentPlan(
-            medications=medications,
-            requires_referral=needs_referral,
-            referral_reason=referral_reason,
-        )
-
-        trace_strings = [
-            step.format() for step in agent_result.reasoning_trace
-        ]
-
-        return {
-            "diagnosis": diagnosis,
-            "treatment_plan": treatment,
-            "reasoning_trace": trace_strings,
-            "agent_result": agent_result,
         }
 
     def check_drugs(state: VisitState) -> dict:
@@ -259,16 +208,8 @@ def build_visit_graph(
             return "analyze_images"
         return "extract_meds"
 
-    def route_diagnosis_mode(state: VisitState) -> str:
-        """Route to agentic or linear diagnosis."""
-        if state.get("use_agentic", False):
-            return "diagnose_agentic"
-        return "diagnose_linear"
-
     def route_after_drugs(state: VisitState) -> str:
-        """Skip find_alternatives in agentic mode or no interactions."""
-        if state.get("use_agentic", False):
-            return "assess_safety"
+        """Skip find_alternatives if no interactions."""
         interactions = state.get("drug_interactions", [])
         if interactions:
             return "find_alternatives"
@@ -281,8 +222,7 @@ def build_visit_graph(
     graph.add_node("intake", intake)
     graph.add_node("analyze_images", analyze_images)
     graph.add_node("extract_meds", extract_meds)
-    graph.add_node("diagnose_linear", diagnose_linear)
-    graph.add_node("diagnose_agentic", diagnose_agentic)
+    graph.add_node("diagnose", diagnose)
     graph.add_node("check_drugs", check_drugs)
     graph.add_node("find_alternatives", find_alternatives)
     graph.add_node("assess_safety", assess_safety)
@@ -299,18 +239,8 @@ def build_visit_graph(
     )
 
     graph.add_edge("analyze_images", "extract_meds")
-
-    graph.add_conditional_edges(
-        "extract_meds",
-        route_diagnosis_mode,
-        {
-            "diagnose_agentic": "diagnose_agentic",
-            "diagnose_linear": "diagnose_linear",
-        },
-    )
-
-    graph.add_edge("diagnose_linear", "check_drugs")
-    graph.add_edge("diagnose_agentic", "check_drugs")
+    graph.add_edge("extract_meds", "diagnose")
+    graph.add_edge("diagnose", "check_drugs")
 
     graph.add_conditional_edges(
         "check_drugs",

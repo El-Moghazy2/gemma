@@ -1,14 +1,22 @@
-"""HealthPost: Agentic CHW decision support powered by MedGemma.
+"""HealthPost: CHW decision support powered by MedGemma.
 
 Provides a complete patient visit workflow for Community Health Workers:
-intake, diagnosis, prescription, and dispensing. Uses MedGemma for medical
-vision and reasoning, MedASR for voice transcription, and a ReAct agent
-for autonomous clinical reasoning.
+intake, diagnosis, prescription, and dispensing.
 """
 
-from .agent import AgentResult, MedicalAgent
 from .config import Config
-from .core import HealthPost
+from .core import HealthPost, PatientVisitResult
+from .drugs import DrugInteraction
+from .triage import ClinicalAssessment, Diagnosis, Medication, TreatmentPlan
 
-__version__ = "0.2.0"
-__all__ = ["HealthPost", "Config", "MedicalAgent", "AgentResult"]
+__version__ = "0.3.0"
+__all__ = [
+    "HealthPost",
+    "Config",
+    "PatientVisitResult",
+    "Diagnosis",
+    "TreatmentPlan",
+    "Medication",
+    "ClinicalAssessment",
+    "DrugInteraction",
+]
