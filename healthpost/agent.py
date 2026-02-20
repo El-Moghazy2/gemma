@@ -1,54 +1,63 @@
-"""ReAct-style medical agent powered by MedGemma.
+"""LangGraph ReAct agent powered by MedGemma.
 
-Implements an agentic workflow where MedGemma autonomously reasons through
-a patient case, deciding which tools to call and when.
+Uses @tool-decorated functions and ToolNode for proper tool dispatch.
+Replaces the hand-rolled ReAct loop with 2 registered tools:
+  - analyze_image: vision analysis on patient photos
+  - check_drug_interactions: drug DB safety queries
 """
 
 import logging
 import re
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.tools import tool
+from langgraph.graph import END, StateGraph
+from langgraph.graph.message import MessagesState
+from langgraph.prebuilt import ToolNode
+
 from .drugs import DrugDatabase
-from .triage import TriageAgent
 from .vision import MedicalVisionAnalyzer
 
 logger = logging.getLogger(__name__)
 
-AGENT_SYSTEM_PROMPT = (
-    "You are a medical AI agent assisting a Community Health Worker "
-    "(CHW).\nYou reason step-by-step through patient cases and decide "
-    "which tools to use.\n\n"
-    "Available tools:\n"
-    "- analyze_skin(description): Analyze skin condition from photo "
-    "findings\n"
-    "- analyze_wound(description): Assess wound from photo findings\n"
-    "- check_interactions(drug_list): Check drug list for interactions\n"
-    "- lookup_drug(drug_name): Look up drug info (dosing, "
-    "contraindications)\n"
-    "- get_alternative(drug_name, reason): Suggest safer alternative "
-    "medication\n\n"
-    "Process:\n"
-    "1. Review patient information\n"
-    "2. Use [THOUGHT] to reason about what you know and what you need\n"
-    "3. Use [ACTION tool_name(args)] to call a tool\n"
-    "4. Review [OBSERVATION] results\n"
-    "5. Repeat until you have enough information\n"
-    "6. Use [FINAL_ANSWER] to provide your complete assessment\n\n"
-    "Format your response EXACTLY like this:\n"
-    "[THOUGHT] I need to analyze the patient's symptoms and "
-    "determine...\n"
-    "[ACTION check_interactions(Paracetamol, Metformin)]\n"
-    "[THOUGHT] Based on the interaction check, I can now provide my "
-    "assessment...\n"
-    "[FINAL_ANSWER]\n"
-    "DIAGNOSIS: ...\n"
-    "CONFIDENCE: ...\n"
-    "TREATMENT: ...\n"
-    "INTERACTIONS: ...\n"
-    "REFERRAL: ...\n\n"
-    "Always think before acting. Be thorough but concise."
-)
+# ── System prompt template ──────────────────────────────────────────
+
+SYSTEM_PROMPT = """\
+You are a medical AI agent assisting a Community Health Worker (CHW).
+You reason step-by-step through patient cases and decide which tools to use.
+
+Available tools:
+{tools}
+
+Process:
+1. Review patient information
+2. Use [THOUGHT] to reason about what you know and what you need
+3. Use [ACTION tool_name(args)] to call a tool
+4. Review [OBSERVATION] results from tool calls
+5. Repeat until you have enough information
+6. Use [FINAL_ANSWER] to provide your complete assessment
+
+Format your response EXACTLY like this:
+[THOUGHT] I need to analyze the patient's symptoms and determine...
+[ACTION check_drug_interactions(Paracetamol, Metformin)]
+[THOUGHT] Based on the results, I can now provide my assessment...
+[FINAL_ANSWER]
+DIAGNOSIS: ...
+CONFIDENCE: ...
+TREATMENT: ...
+INTERACTIONS: ...
+REFERRAL: ...
+
+Important:
+- Only use tools listed above. Do NOT invent tools.
+- If no tool is needed, go directly to [FINAL_ANSWER].
+- Always think before acting. Be thorough but concise."""
+
+
+# ── Data classes ────────────────────────────────────────────────────
 
 
 @dataclass
@@ -117,444 +126,370 @@ class AgentResult:
         return "\n\n".join(lines)
 
 
-class MedicalAgent:
-    """ReAct agent that reasons through patient cases using tool calls.
+# ── Tool factory ────────────────────────────────────────────────────
 
-    Iterates through ``[THOUGHT]`` -> ``[ACTION]`` -> ``[OBSERVATION]``
-    cycles until reaching a ``[FINAL_ANSWER]`` or exhausting
-    ``MAX_ITERATIONS``.
 
-    Attributes:
-        MAX_ITERATIONS: Maximum reasoning loops.
-        TOOL_DESCRIPTIONS: Mapping of tool names to descriptions.
+def create_tools(drug_db, vision, images=None):
+    """Create @tool functions with dependency injection via closures.
+
+    Args:
+        drug_db: Drug database for interaction checks.
+        vision: Vision analyzer for image analysis.
+        images: Optional list of patient images.
+
+    Returns:
+        List of LangChain tool objects.
     """
 
-    MAX_ITERATIONS = 5
+    @tool
+    def analyze_image(description: str) -> str:
+        """Analyze the patient's medical image for clinical findings."""
+        if images:
+            findings = vision.analyze_medical_image(images[0])
+            return "Findings: " + "; ".join(findings[:5])
+        return "No image available. Proceed with symptom-based assessment."
 
-    TOOL_DESCRIPTIONS: Dict[str, str] = {
-        "analyze_skin": "Analyze skin condition from description/findings",
-        "analyze_wound": "Assess wound from description/findings",
-        "check_interactions": "Check drug list for interactions",
-        "lookup_drug": "Look up drug info (dosing, contraindications)",
-        "get_alternative": "Suggest safer alternative medication",
-    }
+    @tool
+    def check_drug_interactions(drug_list: str) -> str:
+        """Check drug-drug interactions. Pass comma-separated drug names."""
+        drugs = [d.strip() for d in drug_list.split(",") if d.strip()]
+        if len(drugs) < 2:
+            return "Need at least 2 drugs to check."
+        interactions = drug_db.check_interactions(drugs)
+        if not interactions:
+            interactions = drug_db._check_interactions_local(drugs)
+        if not interactions:
+            return f"No interactions found between: {', '.join(drugs)}"
+        return "\n".join(
+            f"{i.severity.upper()}: {' + '.join(i.drugs)} \u2014 {i.description}"
+            for i in interactions
+        )
+
+    return [analyze_image, check_drug_interactions]
+
+
+# ── Helpers ─────────────────────────────────────────────────────────
+
+
+def _format_messages(system_prompt: str, messages: list) -> str:
+    """Convert LangChain messages to a single text prompt for MedGemma.
+
+    Args:
+        system_prompt: System instructions.
+        messages: List of LangChain message objects.
+
+    Returns:
+        Single string prompt.
+    """
+    parts = [f"System: {system_prompt}"]
+    for msg in messages:
+        if isinstance(msg, HumanMessage):
+            parts.append(f"User: {msg.content}")
+        elif isinstance(msg, AIMessage):
+            parts.append(f"Assistant: {msg.content}")
+        elif isinstance(msg, ToolMessage):
+            parts.append(f"Tool result ({msg.name}): {msg.content}")
+    parts.append("Assistant:")
+    return "\n\n".join(parts)
+
+
+def _parse_tool_calls(response: str, tool_names: set, tools: list) -> list:
+    """Parse ``[ACTION tool_name(args)]`` from response into ToolCall dicts.
+
+    Only parses tools that exist in *tool_names*. Unknown tools are
+    silently ignored so the agent reasons without them instead of looping.
+
+    Args:
+        response: Raw model response text.
+        tool_names: Set of valid tool names.
+        tools: List of tool objects (used to map arg names).
+
+    Returns:
+        List of ToolCall dicts with ``name``, ``args``, ``id``.
+    """
+    # Map tool name -> first parameter name
+    arg_names = {}
+    for t in tools:
+        keys = list(t.args.keys())
+        if keys:
+            arg_names[t.name] = keys[0]
+
+    tool_calls = []
+    for match in re.finditer(r"\[ACTION\s+(\w+)\(([^)]*)\)\]", response):
+        name = match.group(1)
+        args_text = match.group(2).strip()
+        if name in tool_names:
+            param = arg_names.get(name, "input")
+            tool_calls.append({
+                "name": name,
+                "args": {param: args_text},
+                "id": f"call_{uuid.uuid4().hex[:8]}",
+            })
+    return tool_calls
+
+
+def _parse_final_answer(content: str, result: AgentResult) -> None:
+    """Parse final answer text into ``AgentResult`` fields.
+
+    Supports both structured ``DIAGNOSIS: X`` and rule-based
+    ``Primary diagnosis: X`` formats.
+
+    Args:
+        content: Final answer text from the model.
+        result: ``AgentResult`` to populate.
+    """
+    for pattern in [
+        r"(?:Primary )?diagnosis:\s*(.+?)(?=\n)",
+        r"DIAGNOSIS:\s*(.+?)(?=\n)",
+    ]:
+        match = re.search(pattern, content, re.IGNORECASE)
+        if match:
+            diag = match.group(1).strip().rstrip(".")
+            if diag:
+                result.diagnosis = diag
+                break
+
+    match = re.search(
+        r"(?:CONFIDENCE|confidence)[:\s]*(high|medium|low|\d+%?)",
+        content, re.IGNORECASE,
+    )
+    if match:
+        conf_str = match.group(1).lower()
+        conf_map = {"high": 0.85, "medium": 0.7, "low": 0.5}
+        if conf_str in conf_map:
+            result.confidence = conf_map[conf_str]
+        elif conf_str.endswith("%"):
+            result.confidence = int(conf_str.rstrip("%")) / 100
+    elif "medium confidence" in content.lower():
+        result.confidence = 0.7
+    elif "high confidence" in content.lower():
+        result.confidence = 0.85
+    elif "low confidence" in content.lower():
+        result.confidence = 0.5
+
+    match = re.search(
+        r"(?:TREATMENT|MEDICATIONS|TREATMENT PLAN)[:\s]*"
+        r"(.+?)(?=\n(?:INTERACTION|REFERRAL|WARNING|FOLLOW)|$)",
+        content, re.IGNORECASE | re.DOTALL,
+    )
+    if match:
+        result.treatment = match.group(1).strip()
+
+    match = re.search(
+        r"INTERACTIONS?:\s*(.+?)(?=\nREFERRAL|\nTREATMENT|$)",
+        content, re.IGNORECASE | re.DOTALL,
+    )
+    if match:
+        result.interactions = match.group(1).strip()
+
+    match = re.search(
+        r"REFERRAL:\s*(.+?)(?=$)",
+        content, re.IGNORECASE | re.DOTALL,
+    )
+    if match:
+        result.referral = match.group(1).strip()
+
+
+# ── Graph builder ───────────────────────────────────────────────────
+
+
+def build_agent_graph(backend, config, tools):
+    """Build and compile the LangGraph ReAct agent graph.
+
+    Args:
+        backend: Inference backend with ``generate_text`` method.
+        config: Application config (provides ``temperature``).
+        tools: List of LangChain tool objects.
+
+    Returns:
+        Compiled LangGraph runnable.
+    """
+    tool_node = ToolNode(tools)
+    tool_names = {t.name for t in tools}
+
+    # Auto-generate tool descriptions from @tool metadata
+    tool_desc = "\n".join(
+        f"- {t.name}({', '.join(t.args.keys())}): {t.description}"
+        for t in tools
+    )
+    system_prompt = SYSTEM_PROMPT.format(tools=tool_desc)
+
+    def agent(state: MessagesState):
+        prompt = _format_messages(system_prompt, state["messages"])
+        response = backend.generate_text(
+            prompt, temperature=config.temperature, max_tokens=512,
+        )
+        tool_calls = _parse_tool_calls(response, tool_names, tools)
+        if tool_calls:
+            msg = AIMessage(content=response, tool_calls=tool_calls)
+        else:
+            msg = AIMessage(content=response)
+        return {"messages": [msg]}
+
+    def should_continue(state: MessagesState):
+        last = state["messages"][-1]
+        if getattr(last, "tool_calls", None):
+            return "tools"
+        return END
+
+    graph = StateGraph(MessagesState)
+    graph.add_node("agent", agent)
+    graph.add_node("tools", tool_node)
+    graph.set_entry_point("agent")
+    graph.add_conditional_edges(
+        "agent", should_continue, {"tools": "tools", END: END},
+    )
+    graph.add_edge("tools", "agent")
+    return graph.compile()
+
+
+# ── Agent class ─────────────────────────────────────────────────────
+
+
+class MedicalAgent:
+    """LangGraph ReAct agent that reasons through patient cases.
+
+    Builds tools and graph per-invocation so that images and other
+    per-visit data are captured in tool closures.
+
+    Attributes:
+        backend: Inference backend for text generation.
+        config: Application configuration.
+        drug_db: Drug database for interaction checks.
+        vision: Vision analyzer for image analysis.
+    """
 
     def __init__(
         self,
-        triage_agent: TriageAgent,
-        vision_analyzer: MedicalVisionAnalyzer,
+        backend,
+        config,
         drug_db: DrugDatabase,
+        vision: MedicalVisionAnalyzer,
     ) -> None:
-        """Initialize the medical agent.
-
-        Args:
-            triage_agent: Triage agent for diagnosis generation.
-            vision_analyzer: Vision analyzer for image analysis.
-            drug_db: Drug database for lookups and interaction checks.
-        """
-        self.triage = triage_agent
-        self.vision = vision_analyzer
+        self.backend = backend
+        self.config = config
         self.drug_db = drug_db
-
-        from .agent_graph import build_agent_graph
-        self._graph = build_agent_graph(triage_agent, vision_analyzer, drug_db)
+        self.vision = vision
 
     def run(
         self,
         symptoms: str,
-        visual_findings: Optional[List[str]] = None,
         current_meds: Optional[List[str]] = None,
         patient_age: Optional[str] = None,
         images: Optional[List[Any]] = None,
     ) -> AgentResult:
-        """Run the full agentic workflow for a patient case.
-
-        Delegates to the LangGraph agent graph.
+        """Run the LangGraph ReAct agent for a patient case.
 
         Args:
             symptoms: Text description of symptoms.
-            visual_findings: Pre-analyzed visual findings.
             current_meds: Current medication list.
             patient_age: Patient age description.
-            images: Raw images (analyzed if *visual_findings* is absent).
+            images: Raw images for vision analysis.
 
         Returns:
             ``AgentResult`` with diagnosis, treatment, interactions,
             referral, and full reasoning trace.
         """
-        state = {
-            "symptoms": symptoms,
-            "visual_findings": visual_findings,
-            "current_meds": current_meds,
-            "patient_age": patient_age,
-            "images": images,
-            "max_iterations": self.MAX_ITERATIONS,
-            "reasoning_trace": [],
-        }
+        tools = create_tools(self.drug_db, self.vision, images)
+        graph = build_agent_graph(self.backend, self.config, tools)
 
-        final_state = self._graph.invoke(state)
-
-        result = AgentResult(
-            diagnosis=final_state.get("diagnosis", ""),
-            confidence=final_state.get("confidence", 0.7),
-            treatment=final_state.get("treatment", ""),
-            interactions=final_state.get("interactions", ""),
-            referral=final_state.get("referral", ""),
-            reasoning_trace=final_state.get("reasoning_trace", []),
-            raw_response=final_state.get("raw_response", ""),
-        )
-
-        return result
-
-    def _build_context(
-        self,
-        symptoms: str,
-        visual_findings: Optional[List[str]],
-        current_meds: Optional[List[str]],
-        patient_age: Optional[str],
-    ) -> str:
-        """Assemble the patient context block.
-
-        Args:
-            symptoms: Symptom description.
-            visual_findings: Image analysis findings.
-            current_meds: Current medication names.
-            patient_age: Patient age string.
-
-        Returns:
-            Formatted context string.
-        """
+        # Build patient case text
         parts = ["PATIENT CASE:"]
         if patient_age:
             parts.append(f"Age: {patient_age}")
         parts.append(f"Symptoms: {symptoms}")
-
-        if visual_findings:
-            parts.append("Visual findings:")
-            for finding in visual_findings:
-                parts.append(f"  - {finding}")
-
         if current_meds:
             parts.append(
                 f"Current medications: {', '.join(current_meds)}"
             )
-
-        return "\n".join(parts)
-
-    def _build_agent_prompt(self, context: str) -> str:
-        """Build the full agent prompt with system instructions.
-
-        Args:
-            context: Patient context block.
-
-        Returns:
-            Complete prompt string.
-        """
-        return (
-            f"{AGENT_SYSTEM_PROMPT}\n\n{context}\n\n"
-            "Now reason through this case step by step. "
-            "What do you need to know? What tools should you use?\n\n"
-            "[THOUGHT]"
-        )
-
-    def _parse_response(self, response: str) -> List[AgentStep]:
-        """Parse a model response into structured reasoning steps.
-
-        Handles both ``[TAG]``-structured output from MedGemma and
-        unstructured text from the rule-based fallback.
-
-        Args:
-            response: Raw model response text.
-
-        Returns:
-            List of ``AgentStep`` objects.
-        """
-        steps: List[AgentStep] = []
-
-        parts = re.split(
-            r"\[(THOUGHT|ACTION|FINAL_ANSWER|OBSERVATION)\]?\s*",
-            response,
-        )
-
-        i = 0
-        while i < len(parts):
-            part = parts[i].strip()
-            if part in (
-                "THOUGHT", "ACTION", "FINAL_ANSWER", "OBSERVATION",
-            ):
-                step_type = part.lower()
-                content = (
-                    parts[i + 1].strip() if i + 1 < len(parts) else ""
-                )
-                if step_type == "action":
-                    content = content.rstrip("]").strip()
-                if content:
-                    steps.append(AgentStep(step_type, content))
-                i += 2
-            else:
-                i += 1
-
-        if not steps and response.strip():
-            resp_upper = response.upper()
-            has_diagnosis = any(
-                p in resp_upper
-                for p in [
-                    "DIAGNOSIS:", "PRIMARY DIAGNOSIS:", "1. DIAGNOSIS",
-                ]
+        if images:
+            parts.append(
+                "Medical image(s) provided "
+                "\u2014 use analyze_image to examine."
             )
-            if has_diagnosis:
-                steps.append(AgentStep("final_answer", response.strip()))
-            else:
-                steps.append(AgentStep("thought", response.strip()))
+        case_text = "\n".join(parts)
 
-        return steps
+        # Invoke graph (recursion_limit=11 allows up to 5 agent iterations)
+        initial = {"messages": [HumanMessage(content=case_text)]}
+        final_state = graph.invoke(initial, {"recursion_limit": 11})
 
-    def _execute_tool(
-        self,
-        action_str: str,
-        visual_findings: Optional[List[str]],
-        current_meds: Optional[List[str]],
-    ) -> str:
-        """Execute a tool call and return the observation.
+        return self._parse_result(final_state["messages"])
+
+    def _parse_result(self, messages: list) -> AgentResult:
+        """Parse the message history into an ``AgentResult``.
 
         Args:
-            action_str: Tool invocation string, e.g.
-                ``"check_interactions(Aspirin, Warfarin)"``.
-            visual_findings: Current visual findings.
-            current_meds: Current medication list.
+            messages: Final list of LangChain messages from the graph.
 
         Returns:
-            Observation string from the tool.
+            Populated ``AgentResult``.
         """
-        match = re.match(r"(\w+)\(([^)]*)\)", action_str.strip())
-        if not match:
-            parts = action_str.strip().split(None, 1)
-            tool_name = parts[0] if parts else action_str.strip()
-            args_str = parts[1] if len(parts) > 1 else ""
+        result = AgentResult()
+        trace: List[AgentStep] = []
+        raw_parts: List[str] = []
+
+        for msg in messages:
+            if isinstance(msg, HumanMessage):
+                continue
+            if isinstance(msg, AIMessage):
+                raw_parts.append(msg.content)
+                steps = _parse_response_steps(msg.content)
+                trace.extend(steps)
+            elif isinstance(msg, ToolMessage):
+                trace.append(
+                    AgentStep("observation", f"{msg.name}: {msg.content}"),
+                )
+
+        # Parse final answer from the last AI message
+        for msg in reversed(messages):
+            if isinstance(msg, AIMessage):
+                _parse_final_answer(msg.content, result)
+                break
+
+        result.reasoning_trace = trace
+        result.raw_response = "\n".join(raw_parts)
+        return result
+
+
+def _parse_response_steps(response: str) -> List[AgentStep]:
+    """Parse ``[THOUGHT]``/``[ACTION]``/``[FINAL_ANSWER]`` tags from text.
+
+    Args:
+        response: Raw model response.
+
+    Returns:
+        List of ``AgentStep`` objects.
+    """
+    steps: List[AgentStep] = []
+
+    parts = re.split(
+        r"\[(THOUGHT|ACTION|FINAL_ANSWER|OBSERVATION)\]?\s*",
+        response,
+    )
+
+    i = 0
+    while i < len(parts):
+        part = parts[i].strip()
+        if part in ("THOUGHT", "ACTION", "FINAL_ANSWER", "OBSERVATION"):
+            step_type = part.lower()
+            content = parts[i + 1].strip() if i + 1 < len(parts) else ""
+            if step_type == "action":
+                content = content.rstrip("]").strip()
+            if content:
+                steps.append(AgentStep(step_type, content))
+            i += 2
         else:
-            tool_name = match.group(1)
-            args_str = match.group(2)
+            i += 1
 
-        logger.info("Executing tool: %s(%s)", tool_name, args_str)
-
-        try:
-            if tool_name == "analyze_skin":
-                return self._tool_analyze_skin(visual_findings)
-            if tool_name == "analyze_wound":
-                return self._tool_analyze_wound(visual_findings)
-            if tool_name == "check_interactions":
-                return self._tool_check_interactions(
-                    args_str, current_meds,
-                )
-            if tool_name == "lookup_drug":
-                return self._tool_lookup_drug(args_str)
-            if tool_name == "get_alternative":
-                return self._tool_get_alternative(args_str)
-            available = ", ".join(self.TOOL_DESCRIPTIONS.keys())
-            return f"Unknown tool: {tool_name}. Available: {available}"
-        except Exception as e:
-            logger.error("Tool execution error: %s", e)
-            return f"Tool error: {e}"
-
-    def _tool_analyze_skin(
-        self, visual_findings: Optional[List[str]],
-    ) -> str:
-        """Return skin analysis from existing visual findings.
-
-        Args:
-            visual_findings: Pre-computed findings to summarize.
-
-        Returns:
-            Observation text.
-        """
-        if visual_findings:
-            return (
-                "Skin analysis from visual findings: "
-                f"{'; '.join(visual_findings[:5])}"
-            )
-        return (
-            "No skin image available for analysis. "
-            "Proceeding with symptom-based assessment."
+    if not steps and response.strip():
+        resp_upper = response.upper()
+        has_diagnosis = any(
+            p in resp_upper
+            for p in ["DIAGNOSIS:", "PRIMARY DIAGNOSIS:", "1. DIAGNOSIS"]
         )
+        if has_diagnosis:
+            steps.append(AgentStep("final_answer", response.strip()))
+        else:
+            steps.append(AgentStep("thought", response.strip()))
 
-    def _tool_analyze_wound(
-        self, visual_findings: Optional[List[str]],
-    ) -> str:
-        """Return wound assessment from existing visual findings.
-
-        Args:
-            visual_findings: Pre-computed findings to summarize.
-
-        Returns:
-            Observation text.
-        """
-        if visual_findings:
-            return (
-                "Wound assessment from visual findings: "
-                f"{'; '.join(visual_findings[:5])}"
-            )
-        return (
-            "No wound image available for analysis. "
-            "Proceeding with symptom-based assessment."
-        )
-
-    def _tool_check_interactions(
-        self, args_str: str, current_meds: Optional[List[str]],
-    ) -> str:
-        """Check drug interactions for the given drug list.
-
-        Args:
-            args_str: Comma-separated drug names from the tool call.
-            current_meds: Additional medications to include.
-
-        Returns:
-            Interaction results text.
-        """
-        drugs = [
-            d.strip().strip("'\"")
-            for d in args_str.split(",")
-            if d.strip()
-        ]
-        if current_meds:
-            drugs.extend(current_meds)
-        drugs = list(set(drugs))
-
-        if len(drugs) < 2:
-            return "Need at least 2 medications to check interactions."
-
-        interactions = self.drug_db.check_interactions(drugs)
-        if not interactions:
-            interactions = self.drug_db._check_interactions_local(drugs)
-
-        if not interactions:
-            return f"No interactions found between: {', '.join(drugs)}"
-
-        results = [
-            f"{i.severity.upper()}: {' + '.join(i.drugs)} \u2014 "
-            f"{i.description}. {i.recommendation}"
-            for i in interactions
-        ]
-        return "\n".join(results)
-
-    def _tool_lookup_drug(self, args_str: str) -> str:
-        """Look up drug reference information.
-
-        Args:
-            args_str: Drug name to look up.
-
-        Returns:
-            Drug information text.
-        """
-        drug_name = args_str.strip().strip("'\"")
-        info = self.drug_db.get_drug_info(drug_name)
-        if info:
-            contras = (
-                ", ".join(info.contraindications)
-                if info.contraindications
-                else "None"
-            )
-            doses = "; ".join(
-                f"{k}: {v}" for k, v in info.common_doses.items()
-            )
-            return (
-                f"{info.name} ({info.generic_name}) \u2014 "
-                f"{info.drug_class}. "
-                f"Uses: {', '.join(info.common_uses)}. "
-                f"Contraindications: {contras}. "
-                f"Doses: {doses}"
-            )
-        return f"Drug '{drug_name}' not found in local database."
-
-    def _tool_get_alternative(self, args_str: str) -> str:
-        """Suggest an alternative medication.
-
-        Args:
-            args_str: ``"drug_name, reason"`` comma-separated.
-
-        Returns:
-            Alternative suggestion text.
-        """
-        parts = [p.strip().strip("'\"") for p in args_str.split(",")]
-        drug_name = parts[0] if parts else ""
-
-        info = self.drug_db.get_drug_info(drug_name)
-        if info:
-            alternatives = self.drug_db.search_drugs(info.drug_class)
-            alt_names = [
-                a.name
-                for a in alternatives
-                if a.name.lower() != drug_name.lower()
-            ]
-            if alt_names:
-                return (
-                    f"Alternatives to {drug_name} ({info.drug_class}): "
-                    f"{', '.join(alt_names[:3])}"
-                )
-        return (
-            f"Consider consulting formulary for alternatives to "
-            f"{drug_name}."
-        )
-
-    def _parse_final_answer(
-        self, content: str, result: AgentResult,
-    ) -> None:
-        """Parse final answer text into ``AgentResult`` fields.
-
-        Supports both structured ``DIAGNOSIS: X`` and rule-based
-        ``Primary diagnosis: X`` formats.
-
-        Args:
-            content: Final answer text from the model.
-            result: ``AgentResult`` to populate.
-        """
-        for pattern in [
-            r"(?:Primary )?diagnosis:\s*(.+?)(?=\n)",
-            r"DIAGNOSIS:\s*(.+?)(?=\n)",
-        ]:
-            match = re.search(pattern, content, re.IGNORECASE)
-            if match:
-                diag = match.group(1).strip().rstrip(".")
-                if diag:
-                    result.diagnosis = diag
-                    break
-
-        match = re.search(
-            r"(?:CONFIDENCE|confidence)[:\s]*(high|medium|low|\d+%?)",
-            content, re.IGNORECASE,
-        )
-        if match:
-            conf_str = match.group(1).lower()
-            conf_map = {"high": 0.85, "medium": 0.7, "low": 0.5}
-            if conf_str in conf_map:
-                result.confidence = conf_map[conf_str]
-            elif conf_str.endswith("%"):
-                result.confidence = int(conf_str.rstrip("%")) / 100
-        elif "medium confidence" in content.lower():
-            result.confidence = 0.7
-        elif "high confidence" in content.lower():
-            result.confidence = 0.85
-        elif "low confidence" in content.lower():
-            result.confidence = 0.5
-
-        match = re.search(
-            r"(?:TREATMENT|MEDICATIONS|TREATMENT PLAN)[:\s]*"
-            r"(.+?)(?=\n(?:INTERACTION|REFERRAL|WARNING|FOLLOW)|$)",
-            content, re.IGNORECASE | re.DOTALL,
-        )
-        if match:
-            result.treatment = match.group(1).strip()
-
-        match = re.search(
-            r"INTERACTIONS?:\s*(.+?)(?=\nREFERRAL|\nTREATMENT|$)",
-            content, re.IGNORECASE | re.DOTALL,
-        )
-        if match:
-            result.interactions = match.group(1).strip()
-
-        match = re.search(
-            r"REFERRAL:\s*(.+?)(?=$)",
-            content, re.IGNORECASE | re.DOTALL,
-        )
-        if match:
-            result.referral = match.group(1).strip()
-
+    return steps

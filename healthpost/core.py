@@ -248,7 +248,7 @@ class HealthPost:
         logger.info("Triage agent initialized")
 
         self._agent = MedicalAgent(
-            self._triage, self._vision, self._drug_db,
+            backend, self.config, self._drug_db, self._vision,
         )
         logger.info("Medical agent initialized")
 
