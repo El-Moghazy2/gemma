@@ -48,16 +48,16 @@ class TreatmentPlan(BaseModel):
 class ClinicalAssessment(BaseModel):
     """Schema the LLM must fill in. Included in the prompt via model_json_schema()."""
 
-    condition: str
-    confidence: str  # "high" / "medium" / "low"
-    differential_diagnoses: List[str] = Field(default_factory=list)
-    known_symptoms: List[str] = Field(default_factory=list)
-    medications: List[Medication] = Field(default_factory=list)
-    instructions: List[str] = Field(default_factory=list)
-    warning_signs: List[str] = Field(default_factory=list)
-    follow_up_days: int = 3
-    requires_referral: bool = False
-    referral_reason: Optional[str] = None
+    condition: str = Field(description="Primary clinical condition or diagnosis")
+    confidence: str = Field(description="Confidence level of the diagnosis (High, Medium, Low)")
+    differential_diagnoses: List[str] = Field(default_factory=list, description="List of alternative diagnoses to consider")
+    known_symptoms: List[str] = Field(default_factory=list, description="Symptoms observed in the patient")
+    treatment: List[Medication] = Field(default_factory=list, description="Recommended medications and treatment plan")
+    instructions: List[str] = Field(default_factory=list, description="Patient care instructions and management steps")
+    warning_signs: List[str] = Field(default_factory=list, description="Critical warning signs that require immediate referral")
+    follow_up_days: int = Field(default=3, description="Number of days until follow-up appointment")
+    requires_referral: bool = Field(default=False, description="Whether patient needs referral to higher facility")
+    referral_reason: Optional[str] = Field(default=None, description="Reason for referral if applicable")
 
 
 CONFIDENCE_MAP = {"high": 0.85, "medium": 0.7, "low": 0.5}
@@ -147,7 +147,7 @@ class TriageAgent:
             known_symptoms=assessment.known_symptoms,
         )
         treatment = TreatmentPlan(
-            medications=assessment.medications,
+            medications=assessment.treatment,
             instructions=assessment.instructions,
             follow_up_days=assessment.follow_up_days,
             warning_signs=assessment.warning_signs,
