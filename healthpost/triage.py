@@ -21,6 +21,7 @@ class Medication(BaseModel):
     name: str
     dosage: str
     duration: Optional[str] = None
+    justification: Optional[str] = None
 
 
 class Diagnosis(BaseModel):
@@ -179,9 +180,11 @@ class TriageAgent:
             "1. A primary diagnosis (condition) with confidence level\n"
             "2. Differential diagnoses to consider\n"
             "3. Known symptoms of the diagnosed condition\n"
-            "4. A TREATMENT PLAN with specific medications — for each medication "
-            "provide the drug name, dosage (e.g. '500mg twice daily'), and "
-            "duration (e.g. '5 days'). Do NOT leave the treatment list empty.\n"
+            "4. A TREATMENT PLAN — if the condition requires medication, provide "
+            "specific medications with drug name, dosage (e.g. '500mg twice daily'), "
+            "duration (e.g. '5 days'), and a short justification for why this "
+            "medication is needed. If no medications are needed, leave the medication "
+            "list empty and focus on supportive care in the instructions.\n"
             "5. Patient care instructions\n"
             "6. Warning signs that require immediate referral\n"
             "7. Follow-up timeline\n"

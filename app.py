@@ -189,6 +189,7 @@ def generate_diagnosis(
         meds_text = "\n".join(
             f"- **{m.name}**: {m.dosage}"
             + (f" for {m.duration}" if m.duration else "")
+            + (f" — {m.justification}" if m.justification else "")
             for m in treatment.medications
         ) if treatment.medications else "- Supportive care only"
 
@@ -607,7 +608,8 @@ def _format_result_markdown(result, hp) -> str:
     if result.treatment_plan.medications:
         for med in result.treatment_plan.medications:
             dur = f" for {med.duration}" if med.duration else ""
-            lines.append(f"- **{med.name}**: {med.dosage}{dur}")
+            justification = f" — {med.justification}" if med.justification else ""
+            lines.append(f"- **{med.name}**: {med.dosage}{dur}{justification}")
     else:
         lines.append("- Supportive care")
     lines.append("")
@@ -781,6 +783,7 @@ def create_interface() -> gr.Blocks:
                     label="Ask about this diagnosis",
                     visible=False,
                     height=300,
+                    type="messages",
                 )
                 with gr.Row(visible=False) as chat_input_row:
                     chat_textbox = gr.Textbox(
