@@ -380,6 +380,9 @@ class HealthPost:
             "i will", "i need", "i should", "the question",
             "the patient is", "formulate", "specifically",
             "can you tell", "ask_question", "tool",
+            # Filter patient demographics echoed by the model
+            "age", "symptoms", "location", "risk factor", "endemic",
+            "bed net", "patient info", "review patient",
         ]
 
         if not agent_result.treatment:

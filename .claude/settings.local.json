@@ -25,7 +25,8 @@
       "WebFetch(domain:github.com)",
       "Bash(grep:*)",
       "WebFetch(domain:unsloth.ai)",
-      "WebFetch(domain:docs.unsloth.ai)"
+      "WebFetch(domain:docs.unsloth.ai)",
+      "WebFetch(domain:ai.google.dev)"
     ]
   }
 }

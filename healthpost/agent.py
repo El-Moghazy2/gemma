@@ -298,8 +298,8 @@ def _parse_final_answer(content: str, result: AgentResult) -> None:
         result.known_symptoms = symptoms
 
     match = re.search(
-        r"(?:TREATMENT|MEDICATIONS|TREATMENT PLAN)[:\s]*"
-        r"(.+?)(?=\n(?:INTERACTION|REFERRAL|WARNING|FOLLOW)|$)",
+        r"\b(?:TREATMENT|TREATMENT PLAN)[:\s]*"
+        r"(.+?)(?=\n(?:INTERACTION|REFERRAL|WARNING|FOLLOW|KNOWN)|$)",
         content, re.IGNORECASE | re.DOTALL,
     )
     if match:
@@ -368,7 +368,7 @@ def build_agent_graph(
     def agent(state: MessagesState):
         prompt = _format_messages(system_prompt, state["messages"])
         response = backend.generate_text(
-            prompt, temperature=config.temperature, max_tokens=512,
+            prompt, temperature=config.temperature, max_tokens=2048,
         )
         tool_calls = _parse_tool_calls(response, tool_names, tools)
         if tool_calls:
