@@ -179,8 +179,6 @@ def build_visit_graph(hp) -> Any:
         all_meds = current_meds + proposed_meds
 
         interactions = hp.drug_db.check_interactions(all_meds)
-        if not interactions and not state.get("use_agentic", False):
-            interactions = hp.drug_db._check_interactions_local(all_meds)
 
         severe_interactions = [
             i for i in interactions if i.severity == "severe"

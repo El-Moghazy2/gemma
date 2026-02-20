@@ -54,7 +54,8 @@ REFERRAL: ...
 Important:
 - Only use tools listed above. Do NOT invent tools.
 - If no tool is needed, go directly to [FINAL_ANSWER].
-- Always think before acting. Be thorough but concise."""
+- Always think before acting. Be thorough but concise.
+- NEVER ask follow-up questions. Work with the information provided and make your best clinical assessment."""
 
 
 # ── Data classes ────────────────────────────────────────────────────
@@ -151,13 +152,13 @@ def create_tools(drug_db, vision, images=None):
 
     @tool
     def check_drug_interactions(drug_list: str) -> str:
-        """Check drug-drug interactions. Pass comma-separated drug names."""
+        """Check drug-drug interactions via DDInter.
+        DDInter only recognises generic/international nonproprietary names, so translate any brand or local names to their generic equivalents before calling.
+        Pass comma-separated names (e.g. 'acetaminophen, metformin', not 'Tylenol, Glucophage')."""
         drugs = [d.strip() for d in drug_list.split(",") if d.strip()]
         if len(drugs) < 2:
             return "Need at least 2 drugs to check."
         interactions = drug_db.check_interactions(drugs)
-        if not interactions:
-            interactions = drug_db._check_interactions_local(drugs)
         if not interactions:
             return f"No interactions found between: {', '.join(drugs)}"
         return "\n".join(

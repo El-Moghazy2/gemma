@@ -232,7 +232,7 @@ class HealthPost:
 
         logger.info("Initializing HealthPost components...")
 
-        self._drug_db = DrugDatabase(self.config.drug_db_path)
+        self._drug_db = DrugDatabase()
         logger.info("Drug database loaded")
 
         self._voice = VoiceTranscriber(self.config)
