@@ -44,6 +44,7 @@ class Diagnosis:
         confidence: Confidence score between 0 and 1.
         supporting_evidence: Evidence supporting the diagnosis.
         differential_diagnoses: Alternative diagnoses considered.
+        known_symptoms: Common symptoms of the diagnosed condition.
         icd_code: Optional ICD-10 code.
     """
 
@@ -51,6 +52,7 @@ class Diagnosis:
     confidence: float
     supporting_evidence: List[str] = field(default_factory=list)
     differential_diagnoses: List[str] = field(default_factory=list)
+    known_symptoms: List[str] = field(default_factory=list)
     icd_code: Optional[str] = None
 
 

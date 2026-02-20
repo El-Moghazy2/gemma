@@ -63,6 +63,7 @@ class PatientVisitResult:
                 "confidence": self.diagnosis.confidence,
                 "supporting_evidence": self.diagnosis.supporting_evidence,
                 "differential": self.diagnosis.differential_diagnoses,
+                "known_symptoms": self.diagnosis.known_symptoms,
             },
             "treatment": {
                 "medications": [
@@ -113,6 +114,11 @@ class PatientVisitResult:
             lines.append("   Evidence:")
             for ev in self.diagnosis.supporting_evidence[:3]:
                 lines.append(f"   - {ev}")
+
+        if self.diagnosis.known_symptoms:
+            lines.append("\nKNOWN SYMPTOMS of this condition:")
+            for sym in self.diagnosis.known_symptoms:
+                lines.append(f"   - {sym}")
 
         lines.append("\nRECOMMENDED TREATMENT:")
         for med in self.treatment_plan.medications:

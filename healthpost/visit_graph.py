@@ -165,6 +165,7 @@ def build_visit_graph(
             supporting_evidence=[
                 f"Symptoms: {state['symptoms'][:100]}",
             ],
+            known_symptoms=agent_result.known_symptoms,
         )
 
         medications = hp._parse_agent_medications(agent_result)

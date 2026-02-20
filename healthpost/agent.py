@@ -42,11 +42,12 @@ Process:
 
 Format your response EXACTLY like this:
 [THOUGHT] I need to analyze the patient's symptoms and determine...
-[ACTION check_drug_interactions(Paracetamol, Metformin)]
+[ACTION check_drug_interactions(DrugA, DrugB)]
 [THOUGHT] Based on the results, I can now provide my assessment...
 [FINAL_ANSWER]
 DIAGNOSIS: ...
 CONFIDENCE: ...
+KNOWN_SYMPTOMS: List ALL common symptoms of the diagnosed condition so the CHW can cross-check with the patient (e.g. "fever, chills, headache, muscle pain, nausea").
 TREATMENT: ...
 INTERACTIONS: ...
 REFERRAL: ...
@@ -55,7 +56,14 @@ Important:
 - Only use tools listed above. Do NOT invent tools.
 - If no tool is needed, go directly to [FINAL_ANSWER].
 - Always think before acting. Be thorough but concise.
-- NEVER ask follow-up questions. Work with the information provided and make your best clinical assessment."""
+- NEVER ask follow-up questions. Work with the information provided and make your best clinical assessment.
+
+Drug interaction check rules (STRICT):
+- The ONLY purpose of check_drug_interactions is to verify safety between the patient's CURRENT medications and the NEW treatment you are about to recommend.
+- You MUST first decide on a diagnosis and treatment, THEN call check_drug_interactions (if needed).
+- Pass BOTH the patient's current medications AND your recommended medications, comma-separated.
+- If the patient has NO current medications listed, SKIP the interaction check entirely — do NOT call the tool.
+- NEVER invent or guess medication names. Only use drugs explicitly listed in the patient case or that you are recommending."""
 
 
 # ── Data classes ────────────────────────────────────────────────────
@@ -97,6 +105,7 @@ class AgentResult:
     Attributes:
         diagnosis: Primary diagnosis string.
         confidence: Confidence score between 0 and 1.
+        known_symptoms: Common symptoms of the diagnosed condition.
         treatment: Treatment plan text.
         interactions: Drug interaction findings text.
         referral: Referral recommendation text.
@@ -106,6 +115,7 @@ class AgentResult:
 
     diagnosis: str = ""
     confidence: float = 0.7
+    known_symptoms: List[str] = field(default_factory=list)
     treatment: str = ""
     interactions: str = ""
     referral: str = ""
@@ -152,9 +162,11 @@ def create_tools(drug_db, vision, images=None):
 
     @tool
     def check_drug_interactions(drug_list: str) -> str:
-        """Check drug-drug interactions via DDInter.
+        """Check drug-drug interactions between the patient's CURRENT medications and your RECOMMENDED treatment.
+        Pass both the patient's current medications AND the medications you are recommending as treatment, comma-separated.
+        Do NOT call this tool until you have decided on a treatment. If the patient has no current medications, do NOT call this tool.
         DDInter only recognises generic/international nonproprietary names, so translate any brand or local names to their generic equivalents before calling.
-        Pass comma-separated names (e.g. 'acetaminophen, metformin', not 'Tylenol, Glucophage')."""
+        Example: if current meds are metformin and you recommend chloroquine, pass 'metformin, chloroquine'."""
         drugs = [d.strip() for d in drug_list.split(",") if d.strip()]
         if len(drugs) < 2:
             return "Need at least 2 drugs to check."
@@ -271,6 +283,19 @@ def _parse_final_answer(content: str, result: AgentResult) -> None:
         result.confidence = 0.85
     elif "low confidence" in content.lower():
         result.confidence = 0.5
+
+    match = re.search(
+        r"KNOWN[_ ]?SYMPTOMS?[:\s]*(.+?)(?=\n(?:TREATMENT|MEDICATION|INTERACTION|REFERRAL)|$)",
+        content, re.IGNORECASE | re.DOTALL,
+    )
+    if match:
+        raw = match.group(1).strip()
+        symptoms = [
+            s.strip().lstrip("- •*").strip()
+            for s in re.split(r"[,\n]", raw)
+            if s.strip().lstrip("- •*").strip()
+        ]
+        result.known_symptoms = symptoms
 
     match = re.search(
         r"(?:TREATMENT|MEDICATIONS|TREATMENT PLAN)[:\s]*"
@@ -457,6 +482,8 @@ class MedicalAgent:
             parts.append(
                 f"Current medications: {', '.join(current_meds)}"
             )
+        else:
+            parts.append("Current medications: None")
         if images:
             parts.append(
                 "Medical image(s) provided "

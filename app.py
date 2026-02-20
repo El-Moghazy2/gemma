@@ -686,6 +686,12 @@ def _format_result_markdown(result, hp) -> str:
         )
         lines.append("")
 
+    if result.diagnosis.known_symptoms:
+        lines.append("**Known symptoms of this condition** *(verify with patient):*")
+        for sym in result.diagnosis.known_symptoms:
+            lines.append(f"- {sym}")
+        lines.append("")
+
     lines.append("## Treatment Plan")
     if result.treatment_plan.medications:
         for med in result.treatment_plan.medications:
