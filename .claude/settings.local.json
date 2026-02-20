@@ -6,7 +6,26 @@
       "Bash(python:*)",
       "Bash(ollama list:*)",
       "Bash(curl:*)",
-      "WebFetch(domain:open.fda.gov)"
+      "WebFetch(domain:open.fda.gov)",
+      "WebFetch(domain:blog.google)",
+      "Bash(gh api:*)",
+      "Bash(PYTHONIOENCODING=utf-8 python:*)",
+      "WebFetch(domain:developers.google.com)",
+      "Bash(huggingface-cli whoami:*)",
+      "Bash(where:*)",
+      "Bash(/c/Users/almog/anaconda3/python:*)",
+      "Bash(pip show:*)",
+      "Bash(conda list:*)",
+      "Bash(./venv/Scripts/python:*)",
+      "Bash(wmic path win32_videocontroller get name:*)",
+      "Bash(powershell -c \"Get-WmiObject Win32_VideoController | Select-Object Name\")",
+      "Bash(powershell -c \"Get-WmiObject Win32_VideoController | Select-Object Name, AdapterRAM, DriverVersion, VideoProcessor\")",
+      "Bash(powershell -c \"Get-CimInstance Win32_Processor | Select-Object Name\")",
+      "WebFetch(domain:ollama.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(grep:*)",
+      "WebFetch(domain:unsloth.ai)",
+      "WebFetch(domain:docs.unsloth.ai)"
     ]
   }
 }

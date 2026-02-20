@@ -1,448 +1,354 @@
-"""
-Medical vision analysis module.
+"""Medical vision analysis module.
 
-Supports multiple backends:
-- Ollama with LLaVA (local, recommended)
-- HuggingFace MedGemma (requires access)
-- Mock mode for testing
-
-Handles:
-- Skin condition analysis (rashes, wounds, lesions)
-- Eye examination (conjunctivitis, jaundice)
-- Prescription/medication label text extraction
+Uses MedGemma 1.5 via HuggingFace for all image analysis, including
+skin condition analysis, wound assessment, eye examination, and
+medication label text extraction.
 """
 
-from typing import List, Union, Optional, Any
-from pathlib import Path
 import logging
 import re
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from .config import Config
 
 logger = logging.getLogger(__name__)
 
 
 class MedicalVisionAnalyzer:
-    """
-    Medical image analysis supporting multiple backends.
+    """MedGemma 1.5 medical image analyzer.
 
-    Supports visual analysis of skin conditions, wounds, eyes,
-    and text extraction from medication labels/prescriptions.
+    Delegates inference to an :class:`~healthpost.inference_backend.InferenceBackend`.
+
+    Attributes:
+        config: Application configuration.
+        backend: Inference backend (Unsloth or HuggingFace).
     """
 
-    def __init__(self, config):
-        """Initialize the vision analyzer."""
+    def __init__(self, config: Config, backend=None) -> None:
+        """Initialize the vision analyzer.
+
+        Args:
+            config: Application configuration instance.
+            backend: Inference backend. If ``None``, one will be created
+                lazily via :func:`~healthpost.inference_backend.create_backend`.
+        """
         self.config = config
-        self._ollama_client = None
-        self._model = None
-        self._processor = None
-        self._backend = None
+        self._backend = backend
 
-    def _init_backend(self):
-        """Initialize the appropriate backend."""
-        if self._backend is not None:
-            return
-
-        # Try Ollama first
-        if self.config.backend == "ollama":
-            try:
-                from .ollama_client import OllamaClient
-                self._ollama_client = OllamaClient(self.config.ollama_host)
-
-                if self._ollama_client.is_available():
-                    if self._ollama_client.has_model(self.config.ollama_vision_model):
-                        self._backend = "ollama"
-                        logger.info(f"Using Ollama vision with model: {self.config.ollama_vision_model}")
-                        return
-                    else:
-                        logger.warning(f"Vision model {self.config.ollama_vision_model} not found")
-                        print(f"Vision model '{self.config.ollama_vision_model}' not found. Pull it with:")
-                        print(f"  ollama pull {self.config.ollama_vision_model}")
-            except Exception as e:
-                logger.warning(f"Ollama vision init failed: {e}")
-
-        # Try HuggingFace
-        if self.config.backend in ["huggingface", "ollama"]:
-            try:
-                from transformers import AutoProcessor, AutoModelForVision2Seq
-                import torch
-
-                logger.info(f"Loading MedGemma model: {self.config.medgemma_model_id}")
-
-                self._processor = AutoProcessor.from_pretrained(
-                    self.config.medgemma_model_id,
-                    trust_remote_code=True,
-                )
-
-                if self.config.use_4bit_quantization and self.config.device == "cuda":
-                    from transformers import BitsAndBytesConfig
-                    quant_config = BitsAndBytesConfig(
-                        load_in_4bit=True,
-                        bnb_4bit_compute_dtype=torch.float16,
-                        bnb_4bit_quant_type="nf4",
-                    )
-                    self._model = AutoModelForVision2Seq.from_pretrained(
-                        self.config.medgemma_model_id,
-                        quantization_config=quant_config,
-                        device_map="auto",
-                        trust_remote_code=True,
-                    )
-                else:
-                    self._model = AutoModelForVision2Seq.from_pretrained(
-                        self.config.medgemma_model_id,
-                        torch_dtype=torch.float16 if self.config.device == "cuda" else torch.float32,
-                        trust_remote_code=True,
-                    )
-                    self._model.to(self.config.device)
-
-                self._backend = "huggingface"
-                logger.info("Using HuggingFace vision backend")
-                return
-            except Exception as e:
-                logger.warning(f"HuggingFace vision init failed: {e}")
-
-        # Fall back to mock
-        self._backend = "mock"
-        logger.info("Using mock vision backend")
+    @property
+    def backend(self):
+        """Lazily resolved inference backend."""
+        if self._backend is None:
+            from .inference_backend import create_backend
+            self._backend = create_backend(self.config)
+        return self._backend
 
     def _prepare_image(self, image: Any):
-        """Prepare image for processing."""
+        """Convert an image to a PIL ``Image``.
+
+        Args:
+            image: PIL Image, file path, numpy array, or Gradio file
+                object.
+
+        Returns:
+            PIL Image in RGB mode.
+
+        Raises:
+            FileNotFoundError: If a path is given but does not exist.
+            ValueError: If the image type is unsupported.
+        """
         from PIL import Image as PILImage
 
-        # Already a PIL Image
+        source_type = type(image).__name__
+
         if isinstance(image, PILImage.Image):
+            logger.debug("Image source: PIL Image, size=%s", image.size)
             return image
 
-        # File path
         if isinstance(image, (str, Path)):
             path = Path(image)
             if path.exists():
-                return PILImage.open(path).convert("RGB")
+                pil_img = PILImage.open(path).convert("RGB")
+                logger.debug(
+                    "Image source: path (%s), size=%s", path, pil_img.size,
+                )
+                return pil_img
             raise FileNotFoundError(f"Image not found: {path}")
 
-        # Numpy array
         try:
             import numpy as np
             if isinstance(image, np.ndarray):
-                if image.dtype == np.uint8:
-                    return PILImage.fromarray(image).convert("RGB")
-                else:
+                if image.dtype != np.uint8:
                     image = (image * 255).astype(np.uint8)
-                    return PILImage.fromarray(image).convert("RGB")
+                pil_img = PILImage.fromarray(image).convert("RGB")
+                logger.debug(
+                    "Image source: ndarray, size=%s", pil_img.size,
+                )
+                return pil_img
         except ImportError:
             pass
 
-        # Gradio image (usually numpy array or filepath)
         if hasattr(image, "name"):
-            return PILImage.open(image.name).convert("RGB")
-
-        raise ValueError(f"Unsupported image type: {type(image)}")
-
-    def _run_inference(self, image, prompt: str) -> str:
-        """Run inference on image with prompt."""
-        self._init_backend()
-
-        if self._backend == "mock":
-            return self._mock_inference(prompt)
-
-        if self._backend == "ollama":
-            return self._ollama_inference(image, prompt)
-
-        if self._backend == "huggingface":
-            return self._huggingface_inference(image, prompt)
-
-        return self._mock_inference(prompt)
-
-    def _ollama_inference(self, image, prompt: str) -> str:
-        """Run inference using Ollama LLaVA."""
-        from .ollama_client import VISION_SYSTEM_PROMPT
-
-        try:
-            pil_image = self._prepare_image(image)
-
-            response = self._ollama_client.generate(
-                model=self.config.ollama_vision_model,
-                prompt=prompt,
-                system=VISION_SYSTEM_PROMPT,
-                temperature=self.config.temperature,
-                max_tokens=self.config.max_new_tokens,
-                images=[pil_image],
+            pil_img = PILImage.open(image.name).convert("RGB")
+            logger.debug(
+                "Image source: file object (%s), size=%s",
+                image.name, pil_img.size,
             )
-            return response
-        except Exception as e:
-            logger.error(f"Ollama vision inference failed: {e}")
-            return self._mock_inference(prompt)
+            return pil_img
 
-    def _huggingface_inference(self, image, prompt: str) -> str:
-        """Run inference using HuggingFace model."""
-        try:
-            import torch
+        raise ValueError(f"Unsupported image type: {source_type}")
 
-            pil_image = self._prepare_image(image)
+    def _run_inference(self, image: Any, prompt: str) -> str:
+        """Run inference via the configured backend.
 
-            inputs = self._processor(
-                text=prompt,
-                images=pil_image,
-                return_tensors="pt",
+        Args:
+            image: Image to analyze.
+            prompt: Text prompt describing the analysis task.
+
+        Returns:
+            Model response text.
+
+        Raises:
+            NotImplementedError: If the backend does not support vision.
+        """
+        if not self.backend.supports_vision:
+            logger.info(
+                "Backend %s does not support vision — skipping image analysis",
+                type(self.backend).__name__,
             )
-            inputs = {k: v.to(self._model.device) for k, v in inputs.items()}
+            raise NotImplementedError(
+                f"The current model does not support image analysis. "
+                f"Image-based features require a vision-capable model."
+            )
 
-            with torch.no_grad():
-                outputs = self._model.generate(
-                    **inputs,
-                    max_new_tokens=self.config.max_new_tokens,
-                    temperature=self.config.temperature,
-                    do_sample=self.config.temperature > 0,
-                )
-
-            response = self._processor.decode(outputs[0], skip_special_tokens=True)
-
-            if prompt in response:
-                response = response.split(prompt)[-1].strip()
-
-            return response
-        except Exception as e:
-            logger.error(f"HuggingFace vision inference failed: {e}")
-            return self._mock_inference(prompt)
+        logger.debug(
+            "Prompt length=%d, first 100 chars: %.100s", len(prompt), prompt,
+        )
+        pil_image = self._prepare_image(image)
+        return self.backend.generate_with_image(
+            pil_image,
+            prompt,
+            temperature=self.config.temperature,
+            max_tokens=self.config.max_new_tokens,
+        )
 
     def analyze_medical_image(
         self,
         image: Any,
         context: Optional[str] = None,
     ) -> List[str]:
-        """
-        Analyze a medical image (skin, wound, eye, etc.).
+        """Analyze a general medical image.
 
         Args:
-            image: Image to analyze
-            context: Optional context about the patient/symptoms
+            image: Image to analyze (skin, wound, eye, etc.).
+            context: Optional patient/symptom context.
 
         Returns:
-            List of clinical findings
+            List of clinical finding strings.
         """
-        prompt = """You are a medical image analysis assistant helping a community health worker.
+        logger.info("Analyzing medical image")
 
-Analyze this medical image and provide:
-1. Description of what you observe
-2. Possible conditions this could indicate
-3. Key clinical features to note
-4. Severity assessment (mild/moderate/severe)
-
-"""
+        prompt = (
+            "You are a medical image analysis assistant helping a "
+            "community health worker.\n\n"
+            "Analyze this medical image and provide:\n"
+            "1. Description of what you observe\n"
+            "2. Possible conditions this could indicate\n"
+            "3. Key clinical features to note\n"
+            "4. Severity assessment (mild/moderate/severe)\n\n"
+        )
         if context:
             prompt += f"Patient context: {context}\n\n"
-
         prompt += "Provide your findings in a clear, structured format."
 
         response = self._run_inference(image, prompt)
-
-        # Parse response into list of findings
         findings = self._parse_findings(response)
-
+        logger.info("Medical image analysis complete: %d findings", len(findings))
         return findings
 
-    def analyze_skin_condition(self, image: Any) -> dict:
+    def analyze_skin_condition(self, image: Any) -> Dict[str, Any]:
+        """Analyze a skin condition image.
+
+        Args:
+            image: Photo of the skin area.
+
+        Returns:
+            Dict with ``raw_analysis`` (full text) and ``findings``
+            (list of strings).
         """
-        Specialized analysis for skin conditions.
+        logger.info("Analyzing skin condition image")
 
-        Returns dict with: condition, features, severity, recommendations
-        """
-        prompt = """Analyze this skin image for a community health worker.
-
-Describe:
-1. APPEARANCE: Color, texture, size, distribution of any lesions/rashes
-2. LIKELY CONDITIONS: Top 3 possible diagnoses with confidence
-3. RED FLAGS: Any signs requiring immediate referral
-4. RECOMMENDED ACTIONS: Next steps for the CHW
-
-Format your response with clear sections."""
-
+        prompt = (
+            "Analyze this skin image for a community health worker.\n\n"
+            "Describe:\n"
+            "1. APPEARANCE: Color, texture, size, distribution of any "
+            "lesions/rashes\n"
+            "2. LIKELY CONDITIONS: Top 3 possible diagnoses with "
+            "confidence\n"
+            "3. RED FLAGS: Any signs requiring immediate referral\n"
+            "4. RECOMMENDED ACTIONS: Next steps for the CHW\n\n"
+            "Format your response with clear sections."
+        )
         response = self._run_inference(image, prompt)
-
+        findings = self._parse_findings(response)
+        logger.info("Skin analysis complete: %d findings", len(findings))
         return {
             "raw_analysis": response,
-            "findings": self._parse_findings(response),
+            "findings": findings,
         }
 
-    def analyze_wound(self, image: Any) -> dict:
+    def analyze_wound(self, image: Any) -> Dict[str, Any]:
+        """Analyze a wound image.
+
+        Args:
+            image: Photo of the wound.
+
+        Returns:
+            Dict with ``raw_analysis`` (full text) and ``findings``
+            (list of strings).
         """
-        Specialized analysis for wounds.
+        logger.info("Analyzing wound image")
 
-        Returns dict with: type, characteristics, infection_signs, care_recommendations
-        """
-        prompt = """Analyze this wound image for a community health worker.
-
-Assess:
-1. WOUND TYPE: Cut, abrasion, burn, ulcer, etc.
-2. SIZE & DEPTH: Approximate dimensions and depth
-3. INFECTION SIGNS: Redness, swelling, pus, odor indicators
-4. HEALING STAGE: Inflammatory, proliferative, or remodeling
-5. CARE RECOMMENDATIONS: Cleaning, dressing, medications
-6. REFERRAL NEEDED: Yes/No and why
-
-Provide practical guidance for wound management."""
-
+        prompt = (
+            "Analyze this wound image for a community health worker.\n\n"
+            "Assess:\n"
+            "1. WOUND TYPE: Cut, abrasion, burn, ulcer, etc.\n"
+            "2. SIZE & DEPTH: Approximate dimensions and depth\n"
+            "3. INFECTION SIGNS: Redness, swelling, pus, odor "
+            "indicators\n"
+            "4. HEALING STAGE: Inflammatory, proliferative, or "
+            "remodeling\n"
+            "5. CARE RECOMMENDATIONS: Cleaning, dressing, medications\n"
+            "6. REFERRAL NEEDED: Yes/No and why\n\n"
+            "Provide practical guidance for wound management."
+        )
         response = self._run_inference(image, prompt)
-
+        findings = self._parse_findings(response)
+        logger.info("Wound analysis complete: %d findings", len(findings))
         return {
             "raw_analysis": response,
-            "findings": self._parse_findings(response),
+            "findings": findings,
         }
 
     def extract_medications(self, image: Any) -> List[str]:
-        """
-        Extract medication names from a photo of prescriptions or medicine labels.
+        """Extract medication names from a prescription or label photo.
 
         Args:
-            image: Photo of medications/prescriptions
+            image: Photo of medications or prescriptions.
 
         Returns:
-            List of medication names found
+            List of medication name strings.
         """
-        prompt = """Extract all medication names visible in this image.
+        logger.info("Extracting medications from image")
 
-This may be a photo of:
-- Prescription paper
-- Medicine bottles/boxes
-- Pill packaging
-
-List ONLY the medication names, one per line.
-Include brand names and generic names if both are visible.
-If you cannot read a name clearly, indicate [unclear].
-
-Medication names found:"""
-
+        prompt = (
+            "Extract all medication names visible in this image.\n\n"
+            "This may be a photo of:\n"
+            "- Prescription paper\n"
+            "- Medicine bottles/boxes\n"
+            "- Pill packaging\n\n"
+            "List ONLY the medication names, one per line.\n"
+            "Include brand names and generic names if both are visible.\n"
+            "If you cannot read a name clearly, indicate [unclear].\n\n"
+            "Medication names found:"
+        )
         response = self._run_inference(image, prompt)
-
-        # Parse medication names from response
         medications = self._parse_medication_list(response)
-
+        logger.info("Medication extraction complete: %d medications found", len(medications))
         return medications
 
-    def extract_lab_values(self, image: Any) -> dict:
+    def extract_lab_values(self, image: Any) -> Dict[str, Any]:
+        """Extract lab results from a lab report photo.
+
+        Args:
+            image: Photo of the lab report.
+
+        Returns:
+            Dict with ``raw_text`` and ``values`` (name-to-value mapping).
         """
-        Extract lab values from a lab report photo.
+        logger.info("Extracting lab values from image")
 
-        Returns dict mapping test names to values and reference ranges.
-        """
-        prompt = """Extract all lab test results from this lab report image.
-
-For each test found, provide:
-- Test name
-- Result value with units
-- Reference range if visible
-- Flag if abnormal (HIGH/LOW)
-
-Format as:
-TEST_NAME: VALUE (REFERENCE_RANGE) [FLAG if abnormal]"""
-
+        prompt = (
+            "Extract all lab test results from this lab report image.\n\n"
+            "For each test found, provide:\n"
+            "- Test name\n"
+            "- Result value with units\n"
+            "- Reference range if visible\n"
+            "- Flag if abnormal (HIGH/LOW)\n\n"
+            "Format as:\n"
+            "TEST_NAME: VALUE (REFERENCE_RANGE) [FLAG if abnormal]"
+        )
         response = self._run_inference(image, prompt)
-
+        values = self._parse_lab_values(response)
+        logger.info("Lab value extraction complete: %d values found", len(values))
         return {
             "raw_text": response,
-            "values": self._parse_lab_values(response),
+            "values": values,
         }
 
     def _parse_findings(self, response: str) -> List[str]:
-        """Parse response into list of findings."""
-        findings = []
+        """Parse model output into a list of finding strings.
 
-        # Split by common delimiters
-        lines = response.split("\n")
+        Args:
+            response: Raw model response text.
 
-        for line in lines:
+        Returns:
+            Up to 10 cleaned finding lines.
+        """
+        findings: List[str] = []
+        for line in response.split("\n"):
             line = line.strip()
             if not line:
                 continue
-
-            # Remove bullet points and numbers
             line = re.sub(r"^[\d\.\-\*\•]+\s*", "", line)
-
-            # Skip very short lines or headers
-            if len(line) < 10:
+            if len(line) < 10 or line.endswith(":"):
                 continue
-            if line.endswith(":"):
-                continue
-
             findings.append(line)
-
-        return findings[:10]  # Limit to top 10 findings
+        return findings[:10]
 
     def _parse_medication_list(self, response: str) -> List[str]:
-        """Parse medication names from response."""
-        medications = []
+        """Parse medication names from model output.
 
-        lines = response.split("\n")
+        Args:
+            response: Raw model response text.
 
-        for line in lines:
+        Returns:
+            List of medication name strings.
+        """
+        medications: List[str] = []
+        skip_patterns = [
+            "medication", "found", "visible", "image", "photo",
+            "prescription", "unclear", "cannot", "list",
+        ]
+
+        for line in response.split("\n"):
             line = line.strip()
             if not line:
                 continue
-
-            # Remove bullet points and numbers
             line = re.sub(r"^[\d\.\-\*\•]+\s*", "", line)
-
-            # Skip lines that are clearly not medications
-            skip_patterns = [
-                "medication", "found", "visible", "image", "photo",
-                "prescription", "unclear", "cannot", "list",
-            ]
-            if any(p in line.lower() for p in skip_patterns) and len(line) > 30:
+            if (
+                any(p in line.lower() for p in skip_patterns)
+                and len(line) > 30
+            ):
                 continue
-
-            # Clean up the medication name
-            med_name = line.strip("- •*")
-
+            med_name = line.strip("- \u2022*")
             if med_name and len(med_name) > 2:
                 medications.append(med_name)
-
         return medications
 
-    def _parse_lab_values(self, response: str) -> dict:
-        """Parse lab values from response."""
-        values = {}
+    def _parse_lab_values(self, response: str) -> Dict[str, str]:
+        """Parse lab test name/value pairs from model output.
 
-        lines = response.split("\n")
+        Args:
+            response: Raw model response text.
 
-        for line in lines:
-            # Look for pattern: TEST: VALUE
+        Returns:
+            Mapping of test names to result strings.
+        """
+        values: Dict[str, str] = {}
+        for line in response.split("\n"):
             match = re.match(r"([A-Za-z\s]+):\s*(.+)", line)
             if match:
-                test_name = match.group(1).strip()
-                test_value = match.group(2).strip()
-                values[test_name] = test_value
-
+                values[match.group(1).strip()] = match.group(2).strip()
         return values
-
-    def _mock_inference(self, prompt: str) -> str:
-        """Mock inference for testing without model."""
-        if "medication" in prompt.lower() or "extract" in prompt.lower():
-            return """Medications found:
-- Paracetamol 500mg
-- Amoxicillin 250mg
-- Omeprazole 20mg"""
-
-        if "wound" in prompt.lower():
-            return """WOUND ANALYSIS:
-1. WOUND TYPE: Superficial laceration, approximately 3cm length
-2. SIZE & DEPTH: 3cm x 0.5cm, partial thickness
-3. INFECTION SIGNS: Mild redness at edges, no pus or excessive swelling
-4. HEALING STAGE: Inflammatory phase (recent wound)
-5. CARE: Clean with saline, apply antibiotic ointment, sterile dressing
-6. REFERRAL: No - can be managed at health post"""
-
-        if "skin" in prompt.lower():
-            return """SKIN ANALYSIS:
-1. APPEARANCE: Raised red papules in circular pattern, some with scaling
-2. LIKELY CONDITIONS:
-   - Ringworm (Tinea corporis) - 70% confidence
-   - Contact dermatitis - 20%
-   - Psoriasis - 10%
-3. RED FLAGS: None identified
-4. ACTIONS: Topical antifungal (clotrimazole) for 2 weeks"""
-
-        # Default medical image analysis
-        return """ANALYSIS:
-1. Observation: The image shows a skin condition with visible rash
-2. Possible conditions: Allergic reaction, viral exanthem, or fungal infection
-3. Key features: Erythematous macules, distributed on trunk
-4. Severity: Appears mild to moderate
-5. Recommendation: Monitor for 24-48 hours, treat symptomatically"""

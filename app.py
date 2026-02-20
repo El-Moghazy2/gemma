@@ -1,68 +1,154 @@
-"""
-HealthPost - Complete CHW Decision Support System
+"""HealthPost Gradio web interface for Community Health Workers.
 
-Gradio web interface for Community Health Workers.
 Supports the complete patient visit workflow:
-1. INTAKE - Voice/text symptom capture
-2. DIAGNOSE - Image analysis
-3. PRESCRIBE - AI-generated treatment
-4. DISPENSE - Drug safety check
+
+1. **INTAKE** -- Voice/text symptom capture (MedASR).
+2. **DIAGNOSE** -- Image analysis (MedGemma Vision).
+3. **PRESCRIBE** -- AI-generated treatment (MedGemma Text).
+4. **DISPENSE** -- Drug safety check (Local DB + DDInter).
+
+Features an agentic workflow where MedGemma autonomously reasons
+through cases.
 """
+
+import logging
+from typing import Any, List, Optional, Tuple
 
 import gradio as gr
-from typing import Optional, List, Tuple, Any
-import logging
 
-# Configure logging
+from healthpost import Config, HealthPost
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Import HealthPost components
-from healthpost import HealthPost, Config
-
-# Global instance (lazy loaded)
 _healthpost: Optional[HealthPost] = None
 
 
 def get_healthpost() -> HealthPost:
-    """Get or create the HealthPost instance."""
+    """Return the lazily-initialized ``HealthPost`` singleton."""
     global _healthpost
     if _healthpost is None:
         logger.info("Initializing HealthPost...")
-        config = Config()
-        _healthpost = HealthPost(config)
+        _healthpost = HealthPost(Config())
     return _healthpost
 
 
-# ============================================================================
-# STEP 1: INTAKE - Symptom Capture
-# ============================================================================
+def _get_backend_badge(component: str) -> str:
+    """Return a Markdown badge showing the active model for *component*.
 
-def transcribe_audio(audio: Any) -> str:
-    """Transcribe audio recording of symptoms."""
+    Args:
+        component: One of ``"triage"``, ``"vision"``, or ``"voice"``.
+
+    Returns:
+        Markdown inline-code badge string.
+    """
+    badges = {
+        "triage": "`MedGemma 1.5 Text`",
+        "vision": "`MedGemma 1.5 Vision`",
+        "voice": "`MedASR`",
+    }
+    return badges.get(component, "`Unknown`")
+
+
+DEMO_SCENARIOS = {
+    "Malaria Case": {
+        "symptoms": (
+            "Patient has had high fever for 3 days, shaking chills "
+            "especially at night, severe headache, body aches, and "
+            "sweating. Lives in malaria-endemic area. No bed net used."
+        ),
+        "age": "adult",
+        "meds": "Metformin\nAmlodipine",
+        "image_type": "Other",
+    },
+    "Skin Condition": {
+        "symptoms": (
+            "Patient presents with circular, red, raised patches on "
+            "the trunk and arms. Patches have been growing for 2 weeks "
+            "with itching. Central clearing visible. No fever."
+        ),
+        "age": "child 8 years",
+        "meds": "",
+        "image_type": "Skin/Rash",
+    },
+    "Wound + Drug Interaction": {
+        "symptoms": (
+            "Patient has a deep cut on the forearm from farming. Wound "
+            "is 4cm long, edges are not well approximated. Some redness "
+            "around edges. Patient is on warfarin for heart condition."
+        ),
+        "age": "adult",
+        "meds": "Warfarin\nMetformin",
+        "image_type": "Wound",
+    },
+    "Child Diarrhea": {
+        "symptoms": (
+            "Child has watery diarrhea for 2 days, 6-8 episodes per "
+            "day. Some vomiting. Reduced appetite but still drinking. "
+            "Mild fever. Eyes slightly sunken."
+        ),
+        "age": "child 3 years",
+        "meds": "",
+        "image_type": "Other",
+    },
+}
+
+
+def load_demo_scenario(
+    scenario_name: str,
+) -> Tuple[str, str, str, str]:
+    """Load a demo scenario into the Quick Workflow form fields.
+
+    Args:
+        scenario_name: Key into ``DEMO_SCENARIOS``.
+
+    Returns:
+        Tuple of ``(symptoms, age, meds, image_type)``.
+    """
+    if scenario_name not in DEMO_SCENARIOS:
+        return "", "", "", "Skin/Rash"
+    s = DEMO_SCENARIOS[scenario_name]
+    return s["symptoms"], s["age"], s["meds"], s["image_type"]
+
+
+def transcribe_audio(audio: Any) -> Tuple[str, str]:
+    """Transcribe an audio recording of symptoms.
+
+    Args:
+        audio: Gradio audio component value.
+
+    Returns:
+        Tuple of ``(transcribed_text, source_label_markdown)``.
+    """
     if audio is None:
-        return ""
+        return "", ""
 
     try:
         hp = get_healthpost()
         text = hp.transcribe_symptoms(audio)
-        return text
+        source = hp.voice.source_label
+        return text, f"*{source}*"
     except Exception as e:
-        logger.error(f"Transcription error: {e}")
-        return f"[Error transcribing audio: {e}]"
+        logger.error("Transcription error: %s", e)
+        return f"[Error transcribing audio: {e}]", ""
 
-
-# ============================================================================
-# STEP 2: DIAGNOSE - Image Analysis
-# ============================================================================
 
 def analyze_medical_image(image: Any, image_type: str) -> str:
-    """Analyze a medical image."""
+    """Analyze a medical image and return formatted findings.
+
+    Args:
+        image: Gradio image component value.
+        image_type: Category (``"Skin/Rash"``, ``"Wound"``, etc.).
+
+    Returns:
+        Markdown-formatted analysis text.
+    """
     if image is None:
         return ""
 
     try:
         hp = get_healthpost()
+        badge = _get_backend_badge("vision")
 
         if image_type == "Skin/Rash":
             result = hp.vision.analyze_skin_condition(image)
@@ -72,99 +158,122 @@ def analyze_medical_image(image: Any, image_type: str) -> str:
             findings = hp.vision.analyze_medical_image(image)
             result = {"findings": findings}
 
-        # Format output
-        if "raw_analysis" in result:
-            return result["raw_analysis"]
-        elif "findings" in result:
-            return "\n".join(f"• {f}" for f in result["findings"])
-        else:
-            return str(result)
+        header = f"**Powered by:** {badge}\n\n---\n\n"
 
+        if "raw_analysis" in result:
+            return header + result["raw_analysis"]
+        if "findings" in result:
+            return header + "\n".join(
+                f"- {f}" for f in result["findings"]
+            )
+        return header + str(result)
     except Exception as e:
-        logger.error(f"Image analysis error: {e}")
+        logger.error("Image analysis error: %s", e)
         return f"[Error analyzing image: {e}]"
 
-
-# ============================================================================
-# STEP 3: PRESCRIBE - Diagnosis & Treatment
-# ============================================================================
 
 def generate_diagnosis(
     symptoms_text: str,
     visual_findings: str,
     patient_age: str,
-) -> Tuple[str, str, str]:
-    """Generate diagnosis and treatment plan."""
+):
+    """Generate a diagnosis and treatment plan.
+
+    Yields a loading indicator first, then the final result.
+
+    Args:
+        symptoms_text: Symptom description.
+        visual_findings: Visual findings text (newline-separated).
+        patient_age: Patient age string.
+
+    Yields:
+        Tuple of ``(diagnosis_md, treatment_md, referral_md, trace_md)``.
+    """
+    yield "**Analyzing...**", "", "", "*Starting...*"
+
     if not symptoms_text.strip():
-        return "Please provide symptoms", "", ""
+        yield "Please provide symptoms", "", "", ""
+        return
 
     try:
         hp = get_healthpost()
+        badge = _get_backend_badge("triage")
 
-        # Parse visual findings
-        findings_list = []
+        findings_list: List[str] = []
         if visual_findings.strip():
-            for line in visual_findings.split('\n'):
-                line = line.strip().lstrip('•-* ')
+            for line in visual_findings.split("\n"):
+                line = line.strip().lstrip("\u2022-* ")
                 if line:
                     findings_list.append(line)
 
-        # Generate diagnosis
         diagnosis, treatment = hp.triage.diagnose_and_treat(
             symptoms=symptoms_text,
             visual_findings=findings_list,
             patient_age=patient_age if patient_age else None,
         )
 
-        # Format diagnosis output
-        diagnosis_text = f"""**{diagnosis.condition}**
+        diagnosis_text = (
+            f"**Powered by:** {badge}\n\n---\n\n"
+            f"### {diagnosis.condition}\n\n"
+            f"**Confidence:** {diagnosis.confidence:.0%}\n\n"
+            f"**Supporting Evidence:**\n"
+            f"{chr(10).join(f'- {e}' for e in diagnosis.supporting_evidence)}\n\n"
+            f"**Differential Diagnoses:**\n"
+            f"{chr(10).join(f'- {d}' for d in diagnosis.differential_diagnoses) if diagnosis.differential_diagnoses else '- None'}\n"
+        )
 
-Confidence: {diagnosis.confidence:.0%}
-
-**Supporting Evidence:**
-{chr(10).join(f'• {e}' for e in diagnosis.supporting_evidence)}
-
-**Consider Also:**
-{chr(10).join(f'• {d}' for d in diagnosis.differential_diagnoses) if diagnosis.differential_diagnoses else '• None'}
-"""
-
-        # Format treatment output
         meds_text = "\n".join(
-            f"• **{m.name}**: {m.dosage}" + (f" for {m.duration}" if m.duration else "")
+            f"- **{m.name}**: {m.dosage}"
+            + (f" for {m.duration}" if m.duration else "")
             for m in treatment.medications
-        ) if treatment.medications else "• Supportive care only"
+        ) if treatment.medications else "- Supportive care only"
 
-        treatment_text = f"""**Medications:**
-{meds_text}
+        treatment_text = (
+            f"### Medications\n{meds_text}\n\n"
+            f"### Instructions\n"
+            f"{chr(10).join(f'- {i}' for i in treatment.instructions)}\n\n"
+            f"### Warning Signs (Return if)\n"
+            f"{chr(10).join(f'- {w}' for w in treatment.warning_signs)}\n\n"
+            f"**Follow-up:** {treatment.follow_up_days} days\n"
+        )
 
-**Instructions:**
-{chr(10).join(f'• {i}' for i in treatment.instructions)}
-
-**Warning Signs (Return if):**
-{chr(10).join(f'• {w}' for w in treatment.warning_signs)}
-
-**Follow-up:** {treatment.follow_up_days} days
-"""
-
-        # Referral
         if treatment.requires_referral:
-            referral_text = f"⚠️ **REFERRAL NEEDED**\n\nReason: {treatment.referral_reason}"
+            referral_text = (
+                f"### REFERRAL NEEDED\n\n"
+                f"**Reason:** {treatment.referral_reason}"
+            )
         else:
-            referral_text = "✅ Can be managed at health post level"
+            referral_text = (
+                "### No Referral Needed\n\n"
+                "Can be managed at health post level"
+            )
 
-        return diagnosis_text, treatment_text, referral_text
+        trace_text = (
+            "## Diagnosis Pipeline\n\n"
+            f"1. Analyzed symptoms: *{symptoms_text[:80]}...*\n"
+            f"2. Visual findings: {len(findings_list)} item(s)\n"
+            f"3. Diagnosis: **{diagnosis.condition}** "
+            f"({diagnosis.confidence:.0%})\n"
+            f"4. Generated treatment plan with "
+            f"{len(treatment.medications)} medication(s)\n"
+            f"5. Referral: {'Yes' if treatment.requires_referral else 'No'}\n"
+        )
 
+        yield diagnosis_text, treatment_text, referral_text, trace_text
     except Exception as e:
-        logger.error(f"Diagnosis error: {e}")
-        return f"[Error: {e}]", "", ""
+        logger.error("Diagnosis error: %s", e)
+        yield f"[Error: {e}]", "", "", ""
 
-
-# ============================================================================
-# STEP 4: DISPENSE - Drug Safety Check
-# ============================================================================
 
 def extract_medications_from_photo(image: Any) -> str:
-    """Extract medication names from a photo."""
+    """Extract medication names from a photo of labels.
+
+    Args:
+        image: Gradio image component value.
+
+    Returns:
+        Newline-separated medication names.
+    """
     if image is None:
         return ""
 
@@ -173,7 +282,7 @@ def extract_medications_from_photo(image: Any) -> str:
         medications = hp.vision.extract_medications(image)
         return "\n".join(medications)
     except Exception as e:
-        logger.error(f"Medication extraction error: {e}")
+        logger.error("Medication extraction error: %s", e)
         return f"[Error: {e}]"
 
 
@@ -181,10 +290,15 @@ def check_drug_interactions(
     current_meds_text: str,
     proposed_meds_text: str,
 ) -> Tuple[str, List[Any], List[str]]:
-    """Check for drug interactions.
+    """Check for drug-drug interactions.
+
+    Args:
+        current_meds_text: Current medications (one per line).
+        proposed_meds_text: Proposed medications (one per line).
 
     Returns:
-        Tuple of (formatted_output, interactions_list, dropdown_choices)
+        Tuple of ``(result_markdown, interactions_list,
+        dropdown_choices)``.
     """
     if not current_meds_text.strip() and not proposed_meds_text.strip():
         return "Enter medications to check", [], []
@@ -192,56 +306,71 @@ def check_drug_interactions(
     try:
         hp = get_healthpost()
 
-        # Parse medication lists
-        all_meds = []
-
+        all_meds: List[str] = []
         for text in [current_meds_text, proposed_meds_text]:
-            for line in text.split('\n'):
-                line = line.strip().lstrip('•-* ')
+            for line in text.split("\n"):
+                line = line.strip().lstrip("\u2022-* ")
                 if line:
                     all_meds.append(line)
 
         if len(all_meds) < 2:
-            return "Need at least 2 medications to check for interactions", [], []
+            return (
+                "Need at least 2 medications to check for interactions",
+                [], [],
+            )
 
-        # Check interactions
         interactions = hp.check_drug_interactions(all_meds)
 
         if not interactions:
-            return "✅ **No interactions found**\n\nSafe to proceed with these medications.", [], []
+            return (
+                "### No Interactions Found\n\n"
+                "Safe to proceed with these medications.",
+                [], [],
+            )
 
-        # Format interactions
-        output_lines = ["⚠️ **Drug Interactions Found**\n"]
-        dropdown_choices = []
+        output_lines = ["### Drug Interactions Found\n"]
+        dropdown_choices: List[str] = []
 
-        for idx, interaction in enumerate(interactions):
-            severity_icon = {
-                "severe": "🔴 SEVERE",
-                "moderate": "🟡 MODERATE",
-                "mild": "🟢 MILD",
-            }.get(interaction.severity, "⚪")
+        for interaction in interactions:
+            severity_label = {
+                "severe": "**SEVERE**",
+                "moderate": "**MODERATE**",
+                "mild": "**MILD**",
+            }.get(interaction.severity, "UNKNOWN")
 
-            output_lines.append(f"**{severity_icon}**: {interaction.drugs[0]} + {interaction.drugs[1]}")
-            output_lines.append(f"   {interaction.description}")
-            output_lines.append(f"   *Recommendation: {interaction.recommendation}*")
-            output_lines.append("")
+            output_lines.append(
+                f"#### {severity_label}: "
+                f"{interaction.drugs[0]} + {interaction.drugs[1]}"
+            )
+            output_lines.append(interaction.description)
+            output_lines.append(
+                f"*Recommendation: {interaction.recommendation}*\n"
+            )
 
-            # Build dropdown choice
-            severity_label = interaction.severity.capitalize()
-            dropdown_choices.append(f"{interaction.drugs[0]} + {interaction.drugs[1]} ({severity_label})")
+            sev = interaction.severity.capitalize()
+            dropdown_choices.append(
+                f"{interaction.drugs[0]} + "
+                f"{interaction.drugs[1]} ({sev})"
+            )
 
-        # Safety recommendation
-        severe_count = sum(1 for i in interactions if i.severity == "severe")
+        severe_count = sum(
+            1 for i in interactions if i.severity == "severe"
+        )
         if severe_count > 0:
-            output_lines.append("❌ **DO NOT proceed** - Severe interaction(s) detected!")
-            output_lines.append("Consider alternative medications or refer to hospital.")
+            output_lines.append(
+                "---\n\n**DO NOT proceed** \u2014 "
+                "Severe interaction(s) detected!\n"
+                "Consider alternative medications or refer to hospital."
+            )
         else:
-            output_lines.append("⚠️ **Proceed with caution** - Monitor patient closely.")
+            output_lines.append(
+                "---\n\n**Proceed with caution** \u2014 "
+                "Monitor patient closely."
+            )
 
         return "\n".join(output_lines), interactions, dropdown_choices
-
     except Exception as e:
-        logger.error(f"Interaction check error: {e}")
+        logger.error("Interaction check error: %s", e)
         return f"[Error: {e}]", [], []
 
 
@@ -251,19 +380,32 @@ def get_alternative_for_interaction(
     current_meds_text: str,
     proposed_meds_text: str,
 ) -> str:
-    """Get an alternative medication suggestion for the selected interaction."""
+    """Suggest an alternative medication for a selected interaction.
+
+    Args:
+        selected_interaction: Dropdown value identifying the
+            interaction.
+        interactions_list: Full list of interaction objects.
+        current_meds_text: Current medications text.
+        proposed_meds_text: Proposed medications text.
+
+    Returns:
+        Markdown-formatted alternative suggestion.
+    """
     if not selected_interaction or not interactions_list:
         return ""
 
     try:
         hp = get_healthpost()
 
-        # Find the selected interaction from the list
         selected_idx = None
         for idx, interaction in enumerate(interactions_list):
-            severity_label = interaction.severity.capitalize()
-            choice_str = f"{interaction.drugs[0]} + {interaction.drugs[1]} ({severity_label})"
-            if choice_str == selected_interaction:
+            sev = interaction.severity.capitalize()
+            choice = (
+                f"{interaction.drugs[0]} + "
+                f"{interaction.drugs[1]} ({sev})"
+            )
+            if choice == selected_interaction:
                 selected_idx = idx
                 break
 
@@ -272,62 +414,56 @@ def get_alternative_for_interaction(
 
         interaction = interactions_list[selected_idx]
 
-        # Parse current medications
-        current_meds = []
-        for text in [current_meds_text]:
-            for line in text.split('\n'):
-                line = line.strip().lstrip('•-* ')
-                if line:
-                    current_meds.append(line)
+        current_meds: List[str] = []
+        for line in current_meds_text.split("\n"):
+            line = line.strip().lstrip("\u2022-* ")
+            if line:
+                current_meds.append(line)
 
-        # Determine which drug to replace (prefer replacing proposed medication)
-        proposed_meds = []
-        for line in proposed_meds_text.split('\n'):
-            line = line.strip().lstrip('•-* ')
+        proposed_meds: List[str] = []
+        for line in proposed_meds_text.split("\n"):
+            line = line.strip().lstrip("\u2022-* ")
             if line:
                 proposed_meds.append(line)
 
-        # Find which drug in the interaction is the proposed one (the one to replace)
         drug_to_replace = None
         for drug in interaction.drugs:
             drug_lower = drug.lower()
             for proposed in proposed_meds:
-                if drug_lower in proposed.lower() or proposed.lower() in drug_lower:
+                if (
+                    drug_lower in proposed.lower()
+                    or proposed.lower() in drug_lower
+                ):
                     drug_to_replace = drug
                     break
             if drug_to_replace:
                 break
 
-        # If no proposed med found in interaction, use the first drug in the interaction
         if not drug_to_replace:
             drug_to_replace = interaction.drugs[0]
 
-        # Use the _suggest_alternative method from HealthPost
-        # We need to provide a condition context - we'll use a generic one
-        condition = "the patient's condition"
-
         alternative = hp._suggest_alternative(
-            condition=condition,
+            condition="the patient's condition",
             problematic_drug=drug_to_replace,
             interaction=interaction,
             current_meds=current_meds,
         )
 
         if alternative:
-            return f"""💡 **Suggested Alternative**
-
-Instead of **{drug_to_replace}**:
-
-**{alternative}**
-
-✓ This alternative should not interact with the other medications."""
-        else:
-            return f"""⚠️ **Could not suggest alternative**
-
-Consider consulting with a healthcare provider for an appropriate alternative to **{drug_to_replace}**."""
-
+            return (
+                f"### Suggested Alternative\n\n"
+                f"Instead of **{drug_to_replace}**:\n\n"
+                f"**{alternative}**\n\n"
+                f"This alternative should not interact with the "
+                f"other medications."
+            )
+        return (
+            f"### Could Not Suggest Alternative\n\n"
+            f"Consider consulting with a healthcare provider for an "
+            f"appropriate alternative to **{drug_to_replace}**."
+        )
     except Exception as e:
-        logger.error(f"Alternative suggestion error: {e}")
+        logger.error("Alternative suggestion error: %s", e)
         return f"[Error getting alternative: {e}]"
 
 
@@ -336,19 +472,26 @@ def update_interaction_ui(
     interactions_list: List[Any],
     dropdown_choices: List[str],
 ):
-    """Update the interaction UI components based on results."""
-    has_interactions = len(interactions_list) > 0
+    """Update visibility of the interaction-resolution UI components.
 
+    Args:
+        interaction_result: Markdown result text (unused).
+        interactions_list: Detected interaction objects.
+        dropdown_choices: Choices for the interaction selector.
+
+    Returns:
+        Tuple of Gradio updates for ``(selector, button, output)``.
+    """
+    has_interactions = len(interactions_list) > 0
     return (
-        gr.update(choices=dropdown_choices, value=None, visible=has_interactions),
+        gr.update(
+            choices=dropdown_choices, value=None,
+            visible=has_interactions,
+        ),
         gr.update(visible=has_interactions),
         gr.update(value="", visible=False),
     )
 
-
-# ============================================================================
-# COMPLETE WORKFLOW
-# ============================================================================
 
 def run_complete_workflow(
     audio: Any,
@@ -358,12 +501,31 @@ def run_complete_workflow(
     patient_age: str,
     current_meds_photo: Any,
     current_meds_text: str,
-) -> str:
-    """Run the complete patient visit workflow."""
+    use_agentic: bool,
+):
+    """Run the complete patient visit workflow.
+
+    Yields a loading indicator first, then the final result.
+    Gradio natively supports generators for progressive UI updates.
+
+    Args:
+        audio: Audio recording of symptoms.
+        symptoms_text: Text symptom description.
+        medical_image: Medical image.
+        image_type: Image category string.
+        patient_age: Patient age.
+        current_meds_photo: Photo of current medications.
+        current_meds_text: Text list of current medications.
+        use_agentic: Whether to use the agentic workflow.
+
+    Yields:
+        Tuple of ``(main_output_markdown, reasoning_trace_markdown)``.
+    """
+    yield "**Analyzing case...** This may take a moment.", "*Starting...*"
+
     try:
         hp = get_healthpost()
 
-        # Combine symptoms from audio and text
         final_symptoms = symptoms_text.strip()
         if audio is not None:
             transcribed = hp.transcribe_symptoms(audio)
@@ -373,79 +535,214 @@ def run_complete_workflow(
                 final_symptoms = transcribed
 
         if not final_symptoms:
-            return "Please provide symptoms (voice or text)"
+            yield "Please provide symptoms (voice or text)", ""
+            return
 
-        # Process medical images
         images = [medical_image] if medical_image is not None else []
 
-        # Get current medications
-        current_meds = []
+        current_meds: List[str] = []
         if current_meds_photo is not None:
             current_meds.extend(hp.extract_medications(current_meds_photo))
         if current_meds_text.strip():
-            for line in current_meds_text.split('\n'):
-                line = line.strip().lstrip('•-* ')
+            for line in current_meds_text.split("\n"):
+                line = line.strip().lstrip("\u2022-* ")
                 if line:
                     current_meds.append(line)
 
-        # Run complete workflow
-        result = hp.patient_visit(
-            symptoms_text=final_symptoms,
-            images=images,
-            existing_meds_list=current_meds,
+        if use_agentic:
+            result = hp.patient_visit_agentic(
+                symptoms_text=final_symptoms,
+                images=images,
+                existing_meds_list=current_meds,
+                patient_age=patient_age if patient_age else None,
+            )
+        else:
+            result = hp.patient_visit(
+                symptoms_text=final_symptoms,
+                images=images,
+                existing_meds_list=current_meds,
+            )
+
+        main_output = _format_result_markdown(result, hp)
+        trace_output = _format_reasoning_trace(result)
+        yield main_output, trace_output
+    except Exception as e:
+        logger.error("Workflow error: %s", e)
+        yield f"**Error:** {e}", ""
+
+
+def _format_result_markdown(result, hp) -> str:
+    """Format a ``PatientVisitResult`` as rich Markdown.
+
+    Args:
+        result: Completed patient visit result.
+        hp: HealthPost instance (for badge generation).
+
+    Returns:
+        Markdown string.
+    """
+    lines: List[str] = []
+
+    triage_badge = _get_backend_badge("triage")
+    vision_badge = _get_backend_badge("vision")
+    lines.append(f"**Models:** {triage_badge} {vision_badge}\n")
+    lines.append("---\n")
+
+    lines.append(f"## Diagnosis: {result.diagnosis.condition}")
+    lines.append(
+        f"**Confidence:** {result.diagnosis.confidence:.0%}\n"
+    )
+
+    if result.diagnosis.supporting_evidence:
+        lines.append("**Evidence:**")
+        for ev in result.diagnosis.supporting_evidence[:3]:
+            lines.append(f"- {ev}")
+        lines.append("")
+
+    if result.diagnosis.differential_diagnoses:
+        lines.append(
+            "**Consider also:** "
+            + ", ".join(result.diagnosis.differential_diagnoses)
+        )
+        lines.append("")
+
+    lines.append("## Treatment Plan")
+    if result.treatment_plan.medications:
+        for med in result.treatment_plan.medications:
+            dur = f" for {med.duration}" if med.duration else ""
+            lines.append(f"- **{med.name}**: {med.dosage}{dur}")
+    else:
+        lines.append("- Supportive care")
+    lines.append("")
+
+    if result.treatment_plan.instructions:
+        lines.append("**Instructions:**")
+        for instr in result.treatment_plan.instructions:
+            lines.append(f"- {instr}")
+        lines.append("")
+
+    if result.treatment_plan.warning_signs:
+        lines.append("**Warning Signs (return if):**")
+        for w in result.treatment_plan.warning_signs:
+            lines.append(f"- {w}")
+        lines.append("")
+
+    lines.append("## Drug Safety Check")
+    all_meds = result.current_medications + [
+        m.name for m in result.treatment_plan.medications
+    ]
+    if all_meds:
+        lines.append(f"*Checked: {', '.join(all_meds)}*\n")
+
+    if result.drug_interactions:
+        for interaction in result.drug_interactions:
+            sev = {
+                "severe": "**SEVERE**",
+                "moderate": "**MODERATE**",
+                "mild": "MILD",
+            }.get(interaction.severity, interaction.severity)
+            drug_pair = " + ".join(interaction.drugs)
+            desc = interaction.description[:120]
+            lines.append(f"- {sev}: {drug_pair} \u2014 {desc}")
+        lines.append("")
+
+        if result.alternative_medications:
+            lines.append("**Suggested Alternatives:**")
+            for drug, alt in result.alternative_medications.items():
+                lines.append(f"- Instead of {drug}: **{alt}**")
+            lines.append("")
+    else:
+        lines.append("No interactions detected.\n")
+
+    if result.is_safe_to_proceed:
+        lines.append("### SAFE TO PROCEED")
+    else:
+        lines.append(
+            "### DO NOT PROCEED \u2014 Review interactions above"
+        )
+    lines.append("")
+
+    if result.needs_referral:
+        lines.append(
+            f"### REFERRAL NEEDED\n"
+            f"**Reason:** {result.referral_reason}"
+        )
+    lines.append("")
+
+    if result.treatment_plan.follow_up_days:
+        lines.append(
+            f"**Follow-up:** {result.treatment_plan.follow_up_days} days"
         )
 
-        return result.format_for_display()
-
-    except Exception as e:
-        logger.error(f"Workflow error: {e}")
-        return f"[Error: {e}]"
+    return "\n".join(lines)
 
 
-# ============================================================================
-# GRADIO INTERFACE
-# ============================================================================
+def _format_reasoning_trace(result) -> str:
+    """Format the reasoning trace as Markdown.
+
+    Args:
+        result: Completed patient visit result.
+
+    Returns:
+        Markdown string, or a placeholder if no trace is present.
+    """
+    if not result.reasoning_trace:
+        return "*Standard workflow used \u2014 no reasoning trace.*"
+
+    lines = ["## AI Reasoning Trace\n"]
+    for i, step in enumerate(result.reasoning_trace, 1):
+        lines.append(f"{i}. {step}\n")
+    return "\n".join(lines)
+
 
 def create_interface() -> gr.Blocks:
-    """Create the Gradio interface."""
-
+    """Build and return the Gradio ``Blocks`` application."""
     with gr.Blocks(
         title="HealthPost - CHW Decision Support",
+        theme=gr.themes.Soft(),
     ) as app:
 
-        gr.Markdown("""
-        # 🏥 HealthPost
-        ### Complete Decision Support for Community Health Workers
-
-        This tool helps you through the complete patient visit:
-        **Intake → Diagnose → Prescribe → Dispense**
-
-        ---
-        """)
+        gr.Markdown(
+            "# HealthPost\n"
+            "### Agentic CHW Decision Support with MedGemma\n\n"
+            "AI agent that autonomously guides Community Health Workers "
+            "through **diagnosis, treatment, and drug safety** using "
+            "MedGemma Vision + Text + MedASR.\n\n---"
+        )
 
         with gr.Tabs():
 
-            # ================================================================
-            # TAB 1: Quick Workflow (All-in-One)
-            # ================================================================
-            with gr.TabItem("🚀 Quick Workflow"):
-                gr.Markdown("""
-                ### Complete Patient Visit
-                Fill in what you have and click **Run Complete Workflow**
-                """)
+            with gr.TabItem("Quick Workflow"):
+                gr.Markdown(
+                    "### Complete Patient Visit\n"
+                    "Fill in what you have and click "
+                    "**Run Complete Workflow**"
+                )
+
+                with gr.Row():
+                    gr.Markdown("**Load demo scenario:**")
+                with gr.Row():
+                    demo_btns = {}
+                    for name in DEMO_SCENARIOS:
+                        demo_btns[name] = gr.Button(
+                            name, size="sm", variant="secondary",
+                        )
 
                 with gr.Row():
                     with gr.Column(scale=1):
                         gr.Markdown("#### 1. Patient Symptoms")
                         quick_audio = gr.Audio(
-                            label="🎤 Record symptoms (optional)",
+                            label="Record symptoms (optional)",
                             sources=["microphone"],
                             type="numpy",
                         )
                         quick_symptoms = gr.Textbox(
-                            label="📝 Or type symptoms",
-                            placeholder="Patient has fever for 3 days with headache...",
-                            lines=3,
+                            label="Or type symptoms",
+                            placeholder=(
+                                "Patient has fever for 3 days "
+                                "with headache..."
+                            ),
+                            lines=4,
                         )
                         quick_age = gr.Textbox(
                             label="Patient age",
@@ -455,11 +752,13 @@ def create_interface() -> gr.Blocks:
                     with gr.Column(scale=1):
                         gr.Markdown("#### 2. Medical Image (optional)")
                         quick_image = gr.Image(
-                            label="📷 Photo of skin/wound/eyes",
+                            label="Photo of skin/wound/eyes",
                             type="numpy",
                         )
                         quick_image_type = gr.Radio(
-                            choices=["Skin/Rash", "Wound", "Eyes", "Other"],
+                            choices=[
+                                "Skin/Rash", "Wound", "Eyes", "Other",
+                            ],
                             value="Skin/Rash",
                             label="Image type",
                         )
@@ -467,92 +766,128 @@ def create_interface() -> gr.Blocks:
                     with gr.Column(scale=1):
                         gr.Markdown("#### 3. Current Medications")
                         quick_meds_photo = gr.Image(
-                            label="📷 Photo of current meds (optional)",
+                            label="Photo of current meds (optional)",
                             type="numpy",
                         )
                         quick_meds_text = gr.Textbox(
-                            label="📝 Or list current medications",
+                            label="Or list current medications",
                             placeholder="Paracetamol\nAmoxicillin",
                             lines=3,
                         )
 
+                with gr.Row():
+                    quick_agentic = gr.Checkbox(
+                        label=(
+                            "Enable Agentic Workflow "
+                            "(MedGemma reasons autonomously)"
+                        ),
+                        value=True,
+                    )
+
                 quick_run_btn = gr.Button(
-                    "▶️ Run Complete Workflow",
+                    "Run Complete Workflow",
                     variant="primary",
                     size="lg",
                 )
 
-                quick_output = gr.Textbox(
+                quick_output = gr.Markdown(
                     label="Complete Visit Summary",
-                    lines=25,
                 )
+
+                with gr.Accordion("AI Reasoning Trace", open=False):
+                    quick_trace = gr.Markdown(
+                        label="Reasoning Trace",
+                        value=(
+                            "*Run a workflow to see the AI "
+                            "reasoning trace*"
+                        ),
+                        min_height=400,
+                    )
+
+                for name, btn in demo_btns.items():
+                    btn.click(
+                        fn=lambda n=name: load_demo_scenario(n),
+                        outputs=[
+                            quick_symptoms, quick_age,
+                            quick_meds_text, quick_image_type,
+                        ],
+                    )
 
                 quick_run_btn.click(
                     fn=run_complete_workflow,
                     inputs=[
-                        quick_audio,
-                        quick_symptoms,
-                        quick_image,
-                        quick_image_type,
-                        quick_age,
-                        quick_meds_photo,
-                        quick_meds_text,
+                        quick_audio, quick_symptoms, quick_image,
+                        quick_image_type, quick_age,
+                        quick_meds_photo, quick_meds_text,
+                        quick_agentic,
                     ],
-                    outputs=quick_output,
+                    outputs=[quick_output, quick_trace],
                 )
 
-            # ================================================================
-            # TAB 2: Step-by-Step Workflow
-            # ================================================================
-            with gr.TabItem("📋 Step-by-Step"):
+            with gr.TabItem("Step-by-Step"):
 
-                # Step 1: Intake
-                with gr.Accordion("Step 1: INTAKE - Capture Symptoms", open=True):
+                with gr.Accordion(
+                    "Step 1: INTAKE - Capture Symptoms", open=True,
+                ):
                     with gr.Row():
                         with gr.Column():
                             intake_audio = gr.Audio(
-                                label="🎤 Record patient's symptom description",
+                                label=(
+                                    "Record patient's symptom "
+                                    "description"
+                                ),
                                 sources=["microphone"],
                                 type="numpy",
                             )
-                            transcribe_btn = gr.Button("Transcribe Audio")
+                            transcribe_btn = gr.Button(
+                                "Transcribe Audio",
+                            )
+                            transcribe_source = gr.Markdown("")
 
                         with gr.Column():
                             intake_symptoms = gr.Textbox(
-                                label="📝 Symptoms (transcribed or typed)",
-                                placeholder="Patient has high fever for 3 days...",
+                                label="Symptoms (transcribed or typed)",
+                                placeholder=(
+                                    "Patient has high fever for "
+                                    "3 days..."
+                                ),
                                 lines=4,
                             )
                             intake_age = gr.Textbox(
                                 label="Patient age (optional)",
-                                placeholder="adult / child 5 years / infant",
+                                placeholder=(
+                                    "adult / child 5 years / infant"
+                                ),
                             )
 
                     transcribe_btn.click(
                         fn=transcribe_audio,
                         inputs=intake_audio,
-                        outputs=intake_symptoms,
+                        outputs=[intake_symptoms, transcribe_source],
                     )
 
-                # Step 2: Diagnose (Image)
-                with gr.Accordion("Step 2: DIAGNOSE - Analyze Images", open=False):
+                with gr.Accordion(
+                    "Step 2: DIAGNOSE - Analyze Images", open=False,
+                ):
                     with gr.Row():
                         with gr.Column():
                             diagnose_image = gr.Image(
-                                label="📷 Upload medical image",
+                                label="Upload medical image",
                                 type="numpy",
                             )
                             diagnose_type = gr.Radio(
-                                choices=["Skin/Rash", "Wound", "Eyes", "Other"],
+                                choices=[
+                                    "Skin/Rash", "Wound", "Eyes",
+                                    "Other",
+                                ],
                                 value="Skin/Rash",
                                 label="What are you photographing?",
                             )
                             analyze_btn = gr.Button("Analyze Image")
 
                         with gr.Column():
-                            diagnose_findings = gr.Textbox(
-                                label="🔍 Visual Findings",
-                                lines=8,
+                            diagnose_findings = gr.Markdown(
+                                label="Visual Findings",
                             )
 
                     analyze_btn.click(
@@ -561,36 +896,68 @@ def create_interface() -> gr.Blocks:
                         outputs=diagnose_findings,
                     )
 
-                # Step 3: Prescribe
-                with gr.Accordion("Step 3: PRESCRIBE - Get Treatment Plan", open=False):
-                    with gr.Row():
-                        prescribe_btn = gr.Button(
-                            "Generate Diagnosis & Treatment",
-                            variant="primary",
-                        )
+                with gr.Accordion(
+                    "Step 3: PRESCRIBE - Get Treatment Plan",
+                    open=False,
+                ):
+                    prescribe_btn = gr.Button(
+                        "Generate Diagnosis & Treatment",
+                        variant="primary",
+                    )
 
                     with gr.Row():
-                        prescribe_diagnosis = gr.Markdown(label="📋 Diagnosis")
-                        prescribe_treatment = gr.Markdown(label="💊 Treatment")
-                        prescribe_referral = gr.Markdown(label="🏥 Referral")
+                        prescribe_diagnosis = gr.Markdown(
+                            label="Diagnosis",
+                        )
+                        prescribe_treatment = gr.Markdown(
+                            label="Treatment",
+                        )
+                        prescribe_referral = gr.Markdown(
+                            label="Referral",
+                        )
+
+                    with gr.Accordion(
+                        "AI Reasoning Trace", open=False,
+                    ):
+                        prescribe_trace = gr.Markdown(
+                            label="Reasoning Trace",
+                            value="*Run diagnosis to see trace*",
+                            min_height=400,
+                        )
+
+                    diagnose_findings_text = gr.Textbox(visible=False)
 
                     prescribe_btn.click(
                         fn=generate_diagnosis,
-                        inputs=[intake_symptoms, diagnose_findings, intake_age],
-                        outputs=[prescribe_diagnosis, prescribe_treatment, prescribe_referral],
+                        inputs=[
+                            intake_symptoms, diagnose_findings_text,
+                            intake_age,
+                        ],
+                        outputs=[
+                            prescribe_diagnosis, prescribe_treatment,
+                            prescribe_referral, prescribe_trace,
+                        ],
                     )
 
-                # Step 4: Dispense
-                with gr.Accordion("Step 4: DISPENSE - Safety Check", open=False):
-                    gr.Markdown("Check for drug interactions before dispensing")
+                with gr.Accordion(
+                    "Step 4: DISPENSE - Safety Check", open=False,
+                ):
+                    gr.Markdown(
+                        "Check for drug interactions before dispensing"
+                    )
 
                     with gr.Row():
                         with gr.Column():
                             dispense_photo = gr.Image(
-                                label="📷 Photo of patient's current medications",
+                                label=(
+                                    "Photo of patient's current "
+                                    "medications"
+                                ),
                                 type="numpy",
                             )
-                            extract_meds_btn = gr.Button("Extract Medications from Photo")
+                            extract_meds_btn = gr.Button(
+                                "Extract Medications from Photo",
+                            )
 
                         with gr.Column():
                             dispense_current = gr.Textbox(
@@ -610,69 +977,78 @@ def create_interface() -> gr.Blocks:
                         outputs=dispense_current,
                     )
 
-                    check_btn = gr.Button("🔍 Check Drug Interactions", variant="primary")
-                    interaction_result = gr.Markdown(label="Safety Check Result")
+                    check_btn = gr.Button(
+                        "Check Drug Interactions", variant="primary",
+                    )
+                    interaction_result = gr.Markdown(
+                        label="Safety Check Result",
+                    )
 
-                    # State to store interactions
                     interactions_state = gr.State([])
 
-                    # Interaction resolution UI
                     interaction_selector = gr.Dropdown(
                         label="Select interaction to resolve",
                         choices=[],
                         visible=False,
                     )
-
                     get_alternative_btn = gr.Button(
-                        "💡 Get Alternative Medication",
-                        visible=False,
+                        "Get Alternative Medication", visible=False,
                     )
-
                     alternative_output = gr.Markdown(
-                        label="Suggested Alternative",
-                        visible=False,
+                        label="Suggested Alternative", visible=False,
                     )
 
-                    # Wire up the check button
                     check_btn.click(
                         fn=check_drug_interactions,
                         inputs=[dispense_current, dispense_proposed],
-                        outputs=[interaction_result, interactions_state, interaction_selector],
+                        outputs=[
+                            interaction_result, interactions_state,
+                            interaction_selector,
+                        ],
                     ).then(
                         fn=update_interaction_ui,
-                        inputs=[interaction_result, interactions_state, interaction_selector],
-                        outputs=[interaction_selector, get_alternative_btn, alternative_output],
+                        inputs=[
+                            interaction_result, interactions_state,
+                            interaction_selector,
+                        ],
+                        outputs=[
+                            interaction_selector,
+                            get_alternative_btn, alternative_output,
+                        ],
                     )
 
-                    # Wire up the get alternative button
                     get_alternative_btn.click(
                         fn=get_alternative_for_interaction,
-                        inputs=[interaction_selector, interactions_state, dispense_current, dispense_proposed],
+                        inputs=[
+                            interaction_selector, interactions_state,
+                            dispense_current, dispense_proposed,
+                        ],
                         outputs=alternative_output,
                     ).then(
                         fn=lambda: gr.update(visible=True),
                         outputs=alternative_output,
                     )
 
-            # ================================================================
-            # TAB 3: Drug Reference
-            # ================================================================
-            with gr.TabItem("💊 Drug Reference"):
-                gr.Markdown("""
-                ### Drug Information & Interaction Checker
-                Look up medications and check for interactions
-                """)
+            with gr.TabItem("Drug Reference"):
+                gr.Markdown(
+                    "### Drug Information & Interaction Checker\n"
+                    "Look up medications and check for interactions"
+                )
 
                 with gr.Row():
                     with gr.Column():
                         drug_search = gr.Textbox(
                             label="Search for a drug",
-                            placeholder="e.g., Paracetamol, Amoxicillin",
+                            placeholder=(
+                                "e.g., Paracetamol, Amoxicillin"
+                            ),
                         )
                         search_btn = gr.Button("Search")
 
                     with gr.Column():
-                        drug_info = gr.Markdown(label="Drug Information")
+                        drug_info = gr.Markdown(
+                            label="Drug Information",
+                        )
 
                 def search_drug(query: str) -> str:
                     if not query.strip():
@@ -681,22 +1057,19 @@ def create_interface() -> gr.Blocks:
                         hp = get_healthpost()
                         info = hp.drug_db.get_drug_info(query)
                         if not info:
-                            return f"No information found for '{query}'"
-
-                        return f"""
-**{info.name}** ({info.generic_name})
-
-**Class:** {info.drug_class}
-
-**Common Uses:**
-{chr(10).join(f'• {u}' for u in info.common_uses)}
-
-**Contraindications:**
-{chr(10).join(f'• {c}' for c in info.contraindications) if info.contraindications else '• None listed'}
-
-**Dosages:**
-{chr(10).join(f'• {k}: {v}' for k, v in info.common_doses.items())}
-"""
+                            return (
+                                f"No information found for '{query}'"
+                            )
+                        return (
+                            f"### {info.name} ({info.generic_name})\n\n"
+                            f"**Class:** {info.drug_class}\n\n"
+                            f"**Common Uses:**\n"
+                            f"{chr(10).join(f'- {u}' for u in info.common_uses)}\n\n"
+                            f"**Contraindications:**\n"
+                            f"{chr(10).join(f'- {c}' for c in info.contraindications) if info.contraindications else '- None listed'}\n\n"
+                            f"**Dosages:**\n"
+                            f"{chr(10).join(f'- {k}: {v}' for k, v in info.common_doses.items())}\n"
+                        )
                     except Exception as e:
                         return f"Error: {e}"
 
@@ -706,120 +1079,153 @@ def create_interface() -> gr.Blocks:
                     outputs=drug_info,
                 )
 
-                gr.Markdown("---")
-                gr.Markdown("### Quick Interaction Check")
+                gr.Markdown("---\n### Quick Interaction Check")
 
                 with gr.Row():
                     interact_meds = gr.Textbox(
-                        label="Enter all medications (one per line)",
-                        placeholder="Paracetamol\nAmoxicillin\nMetformin",
+                        label=(
+                            "Enter all medications (one per line)"
+                        ),
+                        placeholder=(
+                            "Paracetamol\nAmoxicillin\nMetformin"
+                        ),
                         lines=6,
                     )
-                    interact_result = gr.Markdown(label="Interaction Results")
+                    interact_result = gr.Markdown(
+                        label="Interaction Results",
+                    )
 
-                # State for quick check interactions
                 quick_interactions_state = gr.State([])
-
-                # Interaction resolution UI for quick check
                 quick_interaction_selector = gr.Dropdown(
                     label="Select interaction to resolve",
                     choices=[],
                     visible=False,
                 )
-
                 quick_get_alternative_btn = gr.Button(
-                    "💡 Get Alternative Medication",
-                    visible=False,
+                    "Get Alternative Medication", visible=False,
                 )
-
                 quick_alternative_output = gr.Markdown(
-                    label="Suggested Alternative",
-                    visible=False,
+                    label="Suggested Alternative", visible=False,
                 )
 
                 interact_btn = gr.Button("Check Interactions")
 
-                # Wire up the check button
                 interact_btn.click(
                     fn=lambda x: check_drug_interactions(x, ""),
                     inputs=interact_meds,
-                    outputs=[interact_result, quick_interactions_state, quick_interaction_selector],
+                    outputs=[
+                        interact_result, quick_interactions_state,
+                        quick_interaction_selector,
+                    ],
                 ).then(
                     fn=update_interaction_ui,
-                    inputs=[interact_result, quick_interactions_state, quick_interaction_selector],
-                    outputs=[quick_interaction_selector, quick_get_alternative_btn, quick_alternative_output],
+                    inputs=[
+                        interact_result, quick_interactions_state,
+                        quick_interaction_selector,
+                    ],
+                    outputs=[
+                        quick_interaction_selector,
+                        quick_get_alternative_btn,
+                        quick_alternative_output,
+                    ],
                 )
 
-                # Wire up the get alternative button
                 quick_get_alternative_btn.click(
-                    fn=lambda sel, interactions, meds: get_alternative_for_interaction(sel, interactions, meds, ""),
-                    inputs=[quick_interaction_selector, quick_interactions_state, interact_meds],
+                    fn=lambda sel, interactions, meds: (
+                        get_alternative_for_interaction(
+                            sel, interactions, meds, "",
+                        )
+                    ),
+                    inputs=[
+                        quick_interaction_selector,
+                        quick_interactions_state, interact_meds,
+                    ],
                     outputs=quick_alternative_output,
                 ).then(
                     fn=lambda: gr.update(visible=True),
                     outputs=quick_alternative_output,
                 )
 
-            # ================================================================
-            # TAB 4: About
-            # ================================================================
-            with gr.TabItem("ℹ️ About"):
-                gr.Markdown("""
-                ## About HealthPost
+            with gr.TabItem("About"):
+                gr.Markdown(
+                    "## About HealthPost\n\n"
+                    "**HealthPost** is an agentic decision support tool "
+                    "for Community Health Workers (CHWs) in low-resource "
+                    "settings, powered by Google's MedGemma family of "
+                    "medical AI models.\n\n"
+                    "### Features\n\n"
+                    "| Feature | Model | Description |\n"
+                    "|---------|-------|-------------|\n"
+                    "| Voice Intake | `MedASR` | Transcribe patient "
+                    "symptoms with medical vocabulary |\n"
+                    "| Image Analysis | `MedGemma Vision` | Analyze "
+                    "skin conditions, wounds, eyes |\n"
+                    "| Diagnosis & Treatment | `MedGemma Text` | "
+                    "AI-assisted diagnosis with confidence scores |\n"
+                    "| Agentic Reasoning | `MedGemma Text` | Autonomous "
+                    "step-by-step clinical reasoning |\n"
+                    "| Drug Safety | `Local DB + DDInter` | Offline "
+                    "drug interaction checking (50+ drugs, 40+ "
+                    "interactions) |\n"
+                    "| Referral Guidance | `Rule-based` | Know when to "
+                    "refer to hospital |\n\n"
+                    "### Agentic Architecture\n\n"
+                    "HealthPost uses a **ReAct (Reason + Act)** agent "
+                    "loop:\n\n"
+                    "1. MedGemma receives the patient case\n"
+                    "2. It **reasons** about what information is needed "
+                    "(`[THOUGHT]`)\n"
+                    "3. It **acts** by calling tools like "
+                    "`analyze_skin`, `check_interactions` "
+                    "(`[ACTION]`)\n"
+                    "4. It reviews observations and decides next steps "
+                    "(`[OBSERVATION]`)\n"
+                    "5. After gathering enough information, it provides "
+                    "a complete assessment (`[FINAL_ANSWER]`)\n\n"
+                    "This transparent reasoning builds CHW trust \u2014 "
+                    "they can see *why* the AI made each decision.\n\n"
+                    "### Technical Details\n\n"
+                    "- **4-bit quantization**: ~4GB VRAM, runs on "
+                    "consumer GPU / Kaggle T4\n"
+                    "- **Offline drug database**: SQLite with 50+ WHO "
+                    "Essential Medicines, 40+ interactions\n"
+                    "- **Edge-ready**: No internet required after model "
+                    "download\n"
+                    "- **Gradio UI**: Mobile browser compatible\n"
+                    "- **MedGemma 1.5**: Latest medical AI model with "
+                    "improved accuracy\n\n"
+                    "### Safety Notice\n\n"
+                    "This tool is designed to **support** clinical "
+                    "decision-making, not replace it. Always use "
+                    "clinical judgment and refer complex cases to "
+                    "higher levels of care.\n\n"
+                    "---\n\n"
+                    "Built for the **MedGemma Impact Challenge 2025**."
+                )
 
-                **HealthPost** is a complete decision support tool designed for
-                Community Health Workers (CHWs) in low-resource settings.
-
-                ### Features
-
-                - **Voice-to-Text**: Record patient symptoms in any language
-                - **Medical Image Analysis**: AI analysis of skin conditions, wounds, and eyes
-                - **Diagnosis Support**: AI-assisted diagnosis with confidence scores
-                - **Treatment Plans**: Evidence-based treatment recommendations
-                - **Drug Safety**: Offline drug interaction checking
-                - **Referral Guidance**: Know when to refer to hospital
-
-                ### Technology
-
-                - **MedGemma 4B**: Google's medical AI model for vision and reasoning
-                - **Offline Drug Database**: WHO Essential Medicines with interaction data
-                - **Edge Deployment**: Designed to run on mobile devices without internet
-
-                ### Safety Notice
-
-                This tool is designed to **support** clinical decision-making, not replace it.
-                Always use clinical judgment and refer complex cases to higher levels of care.
-
-                ### Credits
-
-                Built for the MedGemma Impact Challenge 2024.
-
-                ---
-
-                **Version:** 0.1.0
-                """)
-
-        gr.Markdown("""
-        ---
-        *HealthPost - Supporting CHWs to deliver better care*
-        """)
+        gr.Markdown(
+            "---\n*HealthPost \u2014 Supporting CHWs to deliver "
+            "better care*"
+        )
 
     return app
 
 
-# ============================================================================
-# MAIN
-# ============================================================================
-
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--share", action="store_true")
+    args = parser.parse_args()
+
     print("=" * 50)
     print("HealthPost - CHW Decision Support System")
     print("=" * 50)
     print("\nStarting application...")
 
-    app = create_interface()
-    app.launch(
+    application = create_interface()
+    application.launch(
         server_name="0.0.0.0",
         server_port=7860,
-        share=False,  # Set to True for public URL
+        share=args.share,
     )

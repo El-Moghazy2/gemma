@@ -1,58 +1,52 @@
-"""
-Configuration for HealthPost application.
-"""
+"""Configuration for the HealthPost application."""
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Literal
-import os
+from typing import Optional
 
 
 @dataclass
 class Config:
-    """Configuration settings for HealthPost."""
+    """Application-wide configuration for HealthPost.
 
-    # Backend selection: "ollama", "huggingface", or "mock"
-    backend: str = "ollama"
+    Attributes:
+        medgemma_model_id: HuggingFace model ID for MedGemma 1.5.
+        medasr_model_id: HuggingFace model ID for MedASR.
+        use_4bit_quantization: Whether to quantize models to 4-bit.
+        device: Compute device (``"auto"``, ``"cuda"``, or ``"cpu"``).
+        data_dir: Directory containing static data assets.
+        drug_db_path: Path to the SQLite drug database.
+        max_new_tokens: Maximum tokens per generation call.
+        temperature: Sampling temperature for inference.
+        confidence_threshold: Minimum confidence before recommending
+            referral.
+        sample_rate: Expected audio sample rate in Hz.
+    """
 
-    # Ollama settings
-    ollama_host: str = "http://localhost:11434"
-    ollama_model: str = "gemma3n"  # For text/reasoning (or gemma2, llama3, etc.)
-    ollama_vision_model: str = "llava"  # For image analysis (llava, llava-llama3, etc.)
-
-    # HuggingFace model settings (fallback)
-    medgemma_model_id: str = "google/medgemma-4b-it"
+    medgemma_model_id: str = "google/medgemma-1.5-4b-it"
     medasr_model_id: str = "google/medasr"
 
-    # Quantization for edge deployment
     use_4bit_quantization: bool = True
+    device: str = "auto"
 
-    # Device settings
-    device: str = "auto"  # "auto", "cuda", "cpu"
-
-    # Database paths
-    data_dir: Path = field(default_factory=lambda: Path(__file__).parent.parent / "data")
+    data_dir: Path = field(
+        default_factory=lambda: Path(__file__).parent.parent / "data"
+    )
     drug_db_path: Optional[Path] = None
 
-    # Inference settings
     max_new_tokens: int = 512
-    temperature: float = 0.3  # Lower for more consistent medical advice
-
-    # Safety thresholds
-    confidence_threshold: float = 0.7  # Below this, recommend referral
-
-    # Audio settings
+    temperature: float = 0.3
+    confidence_threshold: float = 0.7
     sample_rate: int = 16000
 
-    def __post_init__(self):
-        """Initialize derived settings."""
+    def __post_init__(self) -> None:
+        """Derive defaults and verify HuggingFace availability."""
         if self.drug_db_path is None:
             self.drug_db_path = self.data_dir / "drugs.db"
 
-        # Ensure data directory exists
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
-        # Auto-detect device
         if self.device == "auto":
             try:
                 import torch
@@ -60,22 +54,15 @@ class Config:
             except ImportError:
                 self.device = "cpu"
 
-        # Check if Ollama is available
-        if self.backend == "ollama":
-            if not self._check_ollama():
-                print("Warning: Ollama not available, falling back to mock mode")
-                self.backend = "mock"
+        self._check_huggingface()
 
-    def _check_ollama(self) -> bool:
-        """Check if Ollama is running."""
-        try:
-            import urllib.request
-            req = urllib.request.Request(f"{self.ollama_host}/api/tags")
-            with urllib.request.urlopen(req, timeout=2) as response:
-                return response.status == 200
-        except Exception:
-            return False
+    def _check_huggingface(self) -> None:
+        """Verify that core ML packages are importable.
+
+        Unsloth manages its own transformer/torch dependencies, so this
+        check is intentionally skipped.
+        """
+        return
 
 
-# Global default configuration
 default_config = Config()
