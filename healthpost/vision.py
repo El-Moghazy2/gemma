@@ -1,6 +1,6 @@
 """Medical vision analysis module.
 
-Uses MedGemma 1.5 via HuggingFace for all image analysis, including
+Uses MedGemma 1.5 via Ollama for all image analysis, including
 skin condition analysis, wound assessment, eye examination, and
 medication label text extraction.
 """
@@ -22,7 +22,7 @@ class MedicalVisionAnalyzer:
 
     Attributes:
         config: Application configuration.
-        backend: Inference backend (Unsloth or HuggingFace).
+        backend: Inference backend (Ollama).
     """
 
     def __init__(self, config: Config, backend=None) -> None:

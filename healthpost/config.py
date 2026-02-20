@@ -9,10 +9,7 @@ class Config:
     """Application-wide configuration for HealthPost.
 
     Attributes:
-        medgemma_model_id: HuggingFace model ID for MedGemma.
-        medasr_model_id: HuggingFace model ID for MedASR.
-        use_4bit_quantization: Whether to quantize models to 4-bit.
-        device: Compute device (``"auto"``, ``"cuda"``, or ``"cpu"``).
+        ollama_model: Ollama model tag for MedGemma.
         data_dir: Directory containing static data assets.
         max_new_tokens: Maximum tokens per generation call.
         temperature: Sampling temperature for inference.
@@ -21,11 +18,7 @@ class Config:
         sample_rate: Expected audio sample rate in Hz.
     """
 
-    medgemma_model_id: str = "google/medgemma-4b-it"
-    medasr_model_id: str = "google/medasr"
-
-    use_4bit_quantization: bool = True
-    device: str = "auto"
+    ollama_model: str = "hf.co/unsloth/medgemma-1.5-4b-it-GGUF:latest"
 
     data_dir: Path = field(
         default_factory=lambda: Path(__file__).parent.parent / "data"
@@ -36,21 +29,7 @@ class Config:
     sample_rate: int = 16000
 
     def __post_init__(self) -> None:
-        """Derive defaults and verify HuggingFace availability."""
         self.data_dir.mkdir(parents=True, exist_ok=True)
-
-        if self.device == "auto":
-            try:
-                import torch
-                self.device = "cuda" if torch.cuda.is_available() else "cpu"
-            except ImportError:
-                self.device = "cpu"
-
-        self._check_huggingface()
-
-    def _check_huggingface(self) -> None:
-        """Verify that core ML packages are importable."""
-        return
 
 
 default_config = Config()

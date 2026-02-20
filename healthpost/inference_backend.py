@@ -1,12 +1,15 @@
 """Inference backend abstraction for MedGemma.
 
-Provides a unified interface for text and vision inference via
-**HuggingFaceBackend** using plain ``transformers`` with optional
-4-bit quantization.
+Provides a unified interface for text, vision, and structured inference
+via **OllamaBackend** using the ``ollama`` Python client.
 """
 
+import base64
 import logging
-from typing import Any, Protocol, runtime_checkable
+from io import BytesIO
+from typing import Any, Protocol, Type, runtime_checkable
+
+from pydantic import BaseModel
 
 from .config import Config
 
@@ -41,68 +44,34 @@ class InferenceBackend(Protocol):
         """Generate a response from an image and prompt."""
         ...
 
+    def generate_structured(
+        self,
+        prompt: str,
+        schema: Type[BaseModel],
+        temperature: float = 0.3,
+        max_tokens: int = 512,
+    ) -> str:
+        """Generate a JSON response constrained to a Pydantic schema.
 
-class HuggingFaceBackend:
-    """Inference backend using HuggingFace transformers.
+        Returns the raw JSON string; the caller validates with Pydantic.
+        """
+        ...
 
-    Loads the model lazily on first call.  Supports 4-bit quantization
-    on CUDA via ``bitsandbytes``.
+
+class OllamaBackend:
+    """Inference backend using Ollama.
+
+    Calls the local Ollama server via the ``ollama`` Python package.
+    Supports text, vision, and structured (schema-constrained) output.
     """
 
     def __init__(self, config: Config) -> None:
         self.config = config
-        self._model = None
-        self._processor = None
+        self._model = config.ollama_model
 
     @property
     def supports_vision(self) -> bool:
-        """HuggingFace MedGemma models support vision natively."""
         return True
-
-    def _init_model(self) -> None:
-        """Load the MedGemma model if not already loaded."""
-        if self._model is not None:
-            return
-
-        from transformers import AutoModelForImageTextToText, AutoProcessor
-        import torch
-
-        model_id = self.config.medgemma_model_id
-        logger.info("Loading HuggingFace model: %s", model_id)
-
-        self._processor = AutoProcessor.from_pretrained(
-            model_id, trust_remote_code=True,
-        )
-
-        if (
-            self.config.use_4bit_quantization
-            and self.config.device == "cuda"
-        ):
-            from transformers import BitsAndBytesConfig
-            quant_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_compute_dtype=torch.bfloat16,
-            )
-            self._model = AutoModelForImageTextToText.from_pretrained(
-                model_id,
-                quantization_config=quant_config,
-                device_map="auto",
-                trust_remote_code=True,
-            )
-        else:
-            dtype = (
-                torch.bfloat16
-                if self.config.device == "cuda"
-                else torch.float32
-            )
-            self._model = AutoModelForImageTextToText.from_pretrained(
-                model_id,
-                torch_dtype=dtype,
-                trust_remote_code=True,
-            )
-            self._model.to(self.config.device)
-
-        logger.info("HuggingFace backend loaded on %s", self.config.device)
 
     def generate_text(
         self,
@@ -110,45 +79,28 @@ class HuggingFaceBackend:
         temperature: float = 0.3,
         max_tokens: int = 512,
     ) -> str:
-        self._init_model()
-        import torch
+        import ollama
 
-        messages = [
-            {"role": "user", "content": [{"type": "text", "text": prompt}]},
-        ]
-        inputs = self._processor.apply_chat_template(
-            messages,
-            add_generation_prompt=True,
-            tokenize=True,
-            return_dict=True,
-            return_tensors="pt",
-        ).to(self._model.device)
-
-        input_len = inputs["input_ids"].shape[-1]
         logger.info(
-            "HF generating: input_tokens=%d, max_new_tokens=%d, "
-            "temperature=%.2f",
-            input_len, max_tokens, temperature,
+            "Ollama generating: model=%s, max_tokens=%d, temperature=%.2f",
+            self._model, max_tokens, temperature,
         )
 
-        with torch.no_grad():
-            outputs = self._model.generate(
-                **inputs,
-                max_new_tokens=max_tokens,
-                temperature=temperature,
-                do_sample=temperature > 0,
-            )
-
-        output_len = outputs[0].shape[-1] - input_len
-        response = self._processor.decode(
-            outputs[0][input_len:], skip_special_tokens=True,
+        response = ollama.chat(
+            model=self._model,
+            messages=[{"role": "user", "content": prompt}],
+            options={"num_predict": max_tokens, "temperature": temperature},
         )
+
+        text = response.message.content
+        tokens_in = response.prompt_eval_count or 0
+        tokens_out = response.eval_count or 0
         logger.info(
-            "HF generation complete: output_tokens=%d, response_length=%d",
-            output_len, len(response),
+            "Ollama complete: input_tokens=%d, output_tokens=%d",
+            tokens_in, tokens_out,
         )
-        logger.debug("HF full response: %s", response)
-        return response
+        logger.debug("Ollama response: %s", text)
+        return text
 
     def generate_with_image(
         self,
@@ -157,58 +109,90 @@ class HuggingFaceBackend:
         temperature: float = 0.3,
         max_tokens: int = 512,
     ) -> str:
-        self._init_model()
-        import torch
+        import ollama
+        from PIL import Image as PILImage
 
-        messages = [
-            {"role": "user", "content": [
-                {"type": "image", "image": image},
-                {"type": "text", "text": prompt},
-            ]},
-        ]
-        inputs = self._processor.apply_chat_template(
-            messages,
-            add_generation_prompt=True,
-            tokenize=True,
-            return_dict=True,
-            return_tensors="pt",
-        ).to(self._model.device)
-
-        input_len = inputs["input_ids"].shape[-1]
-        logger.info(
-            "HF vision generating: input_tokens=%d, max_new_tokens=%d, "
-            "temperature=%.2f",
-            input_len, max_tokens, temperature,
-        )
-
-        with torch.no_grad():
-            outputs = self._model.generate(
-                **inputs,
-                max_new_tokens=max_tokens,
-                temperature=temperature,
-                do_sample=temperature > 0,
+        # Encode PIL image to base64
+        if isinstance(image, PILImage.Image):
+            buf = BytesIO()
+            image.save(buf, format="PNG")
+            img_b64 = base64.b64encode(buf.getvalue()).decode()
+        else:
+            raise ValueError(
+                f"Expected PIL Image, got {type(image).__name__}"
             )
 
-        output_len = outputs[0].shape[-1] - input_len
-        response = self._processor.decode(
-            outputs[0][input_len:], skip_special_tokens=True,
-        )
         logger.info(
-            "HF vision complete: output_tokens=%d, response_length=%d",
-            output_len, len(response),
+            "Ollama vision generating: model=%s, max_tokens=%d, temperature=%.2f",
+            self._model, max_tokens, temperature,
         )
-        logger.debug("HF vision full response: %s", response)
-        return response
+
+        response = ollama.chat(
+            model=self._model,
+            messages=[{
+                "role": "user",
+                "content": prompt,
+                "images": [img_b64],
+            }],
+            options={"num_predict": max_tokens, "temperature": temperature},
+        )
+
+        text = response.message.content
+        tokens_in = response.prompt_eval_count or 0
+        tokens_out = response.eval_count or 0
+        logger.info(
+            "Ollama vision complete: input_tokens=%d, output_tokens=%d",
+            tokens_in, tokens_out,
+        )
+        logger.debug("Ollama vision response: %s", text)
+        return text
+
+    def generate_structured(
+        self,
+        prompt: str,
+        schema: Type[BaseModel],
+        temperature: float = 0.3,
+        max_tokens: int = 512,
+    ) -> str:
+        """Generate JSON constrained to *schema* via Ollama's ``format`` parameter.
+
+        Returns the raw JSON string. The caller is responsible for
+        calling ``schema.model_validate_json(result)``.
+        """
+        import ollama
+
+        logger.info(
+            "Ollama structured generating: model=%s, schema=%s, "
+            "max_tokens=%d, temperature=%.2f",
+            self._model, schema.__name__, max_tokens, temperature,
+        )
+
+        response = ollama.chat(
+            model=self._model,
+            messages=[{"role": "user", "content": prompt}],
+            format=schema.model_json_schema(),
+            options={"num_predict": max_tokens, "temperature": temperature},
+        )
+
+        text = response.message.content
+        tokens_in = response.prompt_eval_count or 0
+        tokens_out = response.eval_count or 0
+        logger.info(
+            "Ollama structured complete: input_tokens=%d, output_tokens=%d",
+            tokens_in, tokens_out,
+        )
+        logger.debug("Ollama structured response: %s", text)
+        return text
 
 
 def create_backend(config: Config) -> InferenceBackend:
-    """Create the HuggingFace inference backend.
+    """Create the Ollama inference backend.
 
     Args:
         config: Application configuration.
 
     Returns:
-        A :class:`HuggingFaceBackend` instance.
+        An :class:`OllamaBackend` instance.
     """
-    logger.info("Using HuggingFace backend: %s", config.medgemma_model_id)
-    return HuggingFaceBackend(config)
+    logger.info("Using Ollama backend: %s", config.ollama_model)
+    return OllamaBackend(config)

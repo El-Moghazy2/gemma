@@ -1,13 +1,8 @@
 # HealthPost - CHW Decision Support System
-# Requires MedGemma via HuggingFace
+# Requires MedGemma via Ollama
 
-# Core ML
-torch>=2.0.0
-transformers>=4.35.0
-
-# Quantization & device mapping
-bitsandbytes>=0.41.0
-accelerate>=0.24.0
+# Ollama client
+ollama>=0.4.0
 
 # Data validation
 pydantic>=2.0.0

@@ -26,7 +26,12 @@
       "Bash(grep:*)",
       "WebFetch(domain:unsloth.ai)",
       "WebFetch(domain:docs.unsloth.ai)",
-      "WebFetch(domain:ai.google.dev)"
+      "WebFetch(domain:ai.google.dev)",
+      "WebFetch(domain:python.langchain.com)",
+      "WebFetch(domain:docs.langchain.com)",
+      "WebFetch(domain:medium.com)",
+      "WebFetch(domain:reference.langchain.com)",
+      "Bash(ollama ps:*)"
     ]
   }
 }

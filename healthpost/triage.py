@@ -5,9 +5,7 @@ and treatment recommendations via MedGemma. Uses Pydantic models and
 JSON-based LLM output parsing.
 """
 
-import json
 import logging
-import re
 from typing import List, Optional, Tuple
 
 from pydantic import BaseModel, Field
@@ -122,8 +120,19 @@ class TriageAgent:
         prompt = self._build_diagnosis_prompt(
             symptoms, visual_findings, patient_age, current_medications,
         )
-        response = self._generate_response(prompt, max_tokens=1024)
-        assessment = self._parse_json_response(response)
+        raw_json = self.backend.generate_structured(
+            prompt,
+            schema=ClinicalAssessment,
+            temperature=self.config.temperature,
+            max_tokens=1024,
+        )
+        try:
+            assessment = ClinicalAssessment.model_validate_json(raw_json)
+        except Exception as e:
+            logger.warning("Structured output validation failed: %s", e)
+            assessment = ClinicalAssessment(
+                condition="Unknown condition", confidence="medium",
+            )
 
         evidence = []
         if symptoms:
@@ -161,12 +170,10 @@ class TriageAgent:
         patient_age: Optional[str],
         current_medications: Optional[List[str]],
     ) -> str:
-        """Build a structured diagnosis prompt requesting JSON output."""
-        schema = ClinicalAssessment.model_json_schema()
-
+        """Build a diagnosis prompt. Schema enforcement is handled by Ollama."""
         prompt = (
             "You are a medical decision support system for a Community Health Worker.\n"
-            "Analyze the patient case and respond with ONLY a valid JSON object.\n\n"
+            "Analyze the patient case and provide a clinical assessment.\n\n"
             "PATIENT CASE:\n"
         )
         if patient_age:
@@ -176,29 +183,5 @@ class TriageAgent:
             prompt += "Visual findings: " + "; ".join(visual_findings) + "\n"
         if current_medications:
             prompt += "Current medications: " + ", ".join(current_medications) + "\n"
-        prompt += (
-            f"\nRespond with ONLY valid JSON matching this schema:\n"
-            f"{json.dumps(schema, indent=2)}\n\n"
-            "JSON response:"
-        )
         return prompt
 
-    def _parse_json_response(self, response: str) -> ClinicalAssessment:
-        """Extract JSON from LLM response, handle markdown fences and preamble."""
-        # Strip markdown code fences if present
-        cleaned = re.sub(r"```(?:json)?\s*", "", response)
-        cleaned = cleaned.strip().rstrip("`")
-
-        # Find the JSON object boundaries
-        start = cleaned.find("{")
-        end = cleaned.rfind("}") + 1
-        if start >= 0 and end > start:
-            json_str = cleaned[start:end]
-            try:
-                return ClinicalAssessment.model_validate_json(json_str)
-            except Exception as e:
-                logger.warning("JSON parse failed: %s", e)
-
-        # Fallback: return defaults
-        logger.warning("No valid JSON found in LLM response, using fallback")
-        return ClinicalAssessment(condition="Unknown condition", confidence="medium")

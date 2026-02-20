@@ -5,35 +5,35 @@ EXAMPLE 1: With current medications, interactions, and alternatives
 HEALTHPOST - PATIENT VISIT SUMMARY
 ==================================================
 
-📋 DIAGNOSIS: Conjunctivitis
+DIAGNOSIS: Conjunctivitis
    Confidence: 70%
    Evidence:
-   • Symptoms: eye feels itchy
-   • Red and inflamed eye visible in image
+   - Symptoms: eye feels itchy
+   - Red and inflamed eye visible in image
 
-💊 RECOMMENDED TREATMENT:
-   • Erythromycin eye drops: 1 drop 3 times daily for 5-7 days
-   • Artificial tears: as needed for comfort
+RECOMMENDED TREATMENT:
+   - Erythromycin eye drops: 1 drop 3 times daily for 5-7 days
+   - Artificial tears: as needed for comfort
 
-📝 INSTRUCTIONS:
-   • Wash hands frequently with soap and water
-   • Avoid touching the affected eye(s)
-   • Do not share towels or washcloths
+INSTRUCTIONS:
+   - Wash hands frequently with soap and water
+   - Avoid touching the affected eye(s)
+   - Do not share towels or washcloths
 
-💊 DRUG INTERACTION CHECK:
+DRUG INTERACTION CHECK:
    Medications checked: Warfarin, Erythromycin eye drops, Artificial tears
 
-   ⚠️ 1 INTERACTION(S) FOUND:
-   🟡 MODERATE: Erythromycin + Warfarin
+   1 INTERACTION(S) FOUND:
+   MODERATE: Erythromycin + Warfarin
       Erythromycin may increase the anticoagulant effect of warfarin, increasing bleeding risk....
       Recommendation: Monitor INR closely when starting or stopping erythromycin....
 
-   💡 SUGGESTED ALTERNATIVES:
+   SUGGESTED ALTERNATIVES:
       Instead of Erythromycin eye drops: Tobramycin eye drops: 1 drop every 4 hours for 7 days
 
-✅ SAFE TO PROCEED with treatment
+SAFE TO PROCEED with treatment
 
-📅 Follow-up in 3 days
+Follow-up in 3 days
 
 ==================================================
 
@@ -45,28 +45,28 @@ EXAMPLE 2: No current medications, no interactions
 HEALTHPOST - PATIENT VISIT SUMMARY
 ==================================================
 
-📋 DIAGNOSIS: Conjunctivitis
+DIAGNOSIS: Conjunctivitis
    Confidence: 70%
    Evidence:
-   • Symptoms: eye feels itchy
-   • Red and inflamed eye visible in image
+   - Symptoms: eye feels itchy
+   - Red and inflamed eye visible in image
 
-💊 RECOMMENDED TREATMENT:
-   • Erythromycin eye drops: 1 drop 3 times daily for 5-7 days
-   • Artificial tears: as needed for comfort
+RECOMMENDED TREATMENT:
+   - Erythromycin eye drops: 1 drop 3 times daily for 5-7 days
+   - Artificial tears: as needed for comfort
 
-📝 INSTRUCTIONS:
-   • Wash hands frequently with soap and water
-   • Avoid touching the affected eye(s)
-   • Do not share towels or washcloths
+INSTRUCTIONS:
+   - Wash hands frequently with soap and water
+   - Avoid touching the affected eye(s)
+   - Do not share towels or washcloths
 
-💊 DRUG INTERACTION CHECK:
+DRUG INTERACTION CHECK:
    Medications checked: Erythromycin eye drops, Artificial tears
 
-   ✓ No interactions detected
+   No interactions detected
 
-✅ SAFE TO PROCEED with treatment
+SAFE TO PROCEED with treatment
 
-📅 Follow-up in 3 days
+Follow-up in 3 days
 
 ==================================================
