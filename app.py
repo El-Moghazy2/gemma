@@ -515,7 +515,7 @@ def _format_agent_trace(steps):
     }
     for i, (step_type, content) in enumerate(steps, 1):
         label = icons.get(step_type, step_type.title())
-        lines.append(f"{i}. **{label}:** {content[:200]}\n")
+        lines.append(f"{i}. **{label}:** {content}\n")
     return "\n".join(lines)
 
 

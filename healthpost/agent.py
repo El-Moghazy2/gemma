@@ -166,7 +166,10 @@ def create_tools(drug_db, vision, images=None):
             for i in interactions
         )
 
-    return [analyze_image, check_drug_interactions]
+    tools = [check_drug_interactions]
+    if images:
+        tools.insert(0, analyze_image)
+    return tools
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
@@ -226,6 +229,7 @@ def _parse_tool_calls(response: str, tool_names: set, tools: list) -> list:
                 "args": {param: args_text},
                 "id": f"call_{uuid.uuid4().hex[:8]}",
             })
+            break  # Only parse the first valid tool call
     return tool_calls
 
 
@@ -321,6 +325,21 @@ def build_agent_graph(
     )
     system_prompt = SYSTEM_PROMPT.format(tools=tool_desc)
 
+    # Shared set to deduplicate progressive on_step callbacks
+    _seen_steps: set = set()
+
+    def _emit_step(step: AgentStep) -> None:
+        """Emit a step via on_step callback, skipping duplicates."""
+        key = (step.step_type, step.content)
+        if key in _seen_steps:
+            return
+        _seen_steps.add(key)
+        logger.info(
+            "Agent step [%s]: %s",
+            step.step_type, step.content[:100],
+        )
+        on_step(step)
+
     def agent(state: MessagesState):
         prompt = _format_messages(system_prompt, state["messages"])
         response = backend.generate_text(
@@ -328,18 +347,21 @@ def build_agent_graph(
         )
         tool_calls = _parse_tool_calls(response, tool_names, tools)
         if tool_calls:
-            msg = AIMessage(content=response, tool_calls=tool_calls)
+            # Truncate content at end of first [ACTION ...] tag to prevent
+            # hallucinated post-action reasoning from polluting history
+            match = re.search(r"\[ACTION\s+\w+\([^)]*\)\]", response)
+            if match:
+                truncated = response[:match.end()]
+            else:
+                truncated = response
+            msg = AIMessage(content=truncated, tool_calls=tool_calls)
         else:
             msg = AIMessage(content=response)
 
         if on_step:
-            steps = _parse_response_steps(response)
+            steps = _parse_response_steps(msg.content)
             for step in steps:
-                logger.info(
-                    "Agent step [%s]: %s",
-                    step.step_type, step.content[:100],
-                )
-                on_step(step)
+                _emit_step(step)
 
         return {"messages": [msg]}
 
@@ -352,11 +374,7 @@ def build_agent_graph(
                         "observation",
                         f"{msg.name}: {msg.content}",
                     )
-                    logger.info(
-                        "Agent step [%s]: %s",
-                        step.step_type, step.content[:100],
-                    )
-                    on_step(step)
+                    _emit_step(step)
         return result
 
     def should_continue(state: MessagesState):
@@ -464,6 +482,7 @@ class MedicalAgent:
         result = AgentResult()
         trace: List[AgentStep] = []
         raw_parts: List[str] = []
+        seen: set = set()
 
         for msg in messages:
             if isinstance(msg, HumanMessage):
@@ -471,11 +490,17 @@ class MedicalAgent:
             if isinstance(msg, AIMessage):
                 raw_parts.append(msg.content)
                 steps = _parse_response_steps(msg.content)
-                trace.extend(steps)
+                for step in steps:
+                    key = (step.step_type, step.content)
+                    if key not in seen:
+                        seen.add(key)
+                        trace.append(step)
             elif isinstance(msg, ToolMessage):
-                trace.append(
-                    AgentStep("observation", f"{msg.name}: {msg.content}"),
-                )
+                step = AgentStep("observation", f"{msg.name}: {msg.content}")
+                key = (step.step_type, step.content)
+                if key not in seen:
+                    seen.add(key)
+                    trace.append(step)
 
         # Parse final answer from the last AI message
         for msg in reversed(messages):

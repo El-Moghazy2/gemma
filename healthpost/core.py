@@ -370,6 +370,10 @@ class HealthPost:
             "complete", "maintain", "monitor", "ensure", "continue",
             "clean", "keep", "check", "avoid", "use bed",
             "small frequent", "isolate", "return if",
+            # Filter model-hallucinated reasoning text
+            "i will", "i need", "i should", "the question",
+            "the patient is", "formulate", "specifically",
+            "can you tell", "ask_question", "tool",
         ]
 
         if not agent_result.treatment:
