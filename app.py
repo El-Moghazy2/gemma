@@ -179,9 +179,11 @@ def generate_diagnosis(
             f"### {diagnosis.condition}\n\n"
             f"**Confidence:** {diagnosis.confidence:.0%}\n\n"
             f"**Supporting Evidence:**\n"
-            f"{chr(10).join(f'- {e}' for e in diagnosis.supporting_evidence)}\n\n"
+            f"{chr(10).join(f'- {e}' for e in diagnosis.supporting_evidence) if diagnosis.supporting_evidence else '- Based on reported symptoms'}\n\n"
             f"**Differential Diagnoses:**\n"
-            f"{chr(10).join(f'- {d}' for d in diagnosis.differential_diagnoses) if diagnosis.differential_diagnoses else '- None'}\n"
+            f"{chr(10).join(f'- {d}' for d in diagnosis.differential_diagnoses) if diagnosis.differential_diagnoses else '- No alternative diagnoses identified'}\n\n"
+            f"**Known Symptoms** *(verify with patient):*\n"
+            f"{chr(10).join(f'- {s}' for s in diagnosis.known_symptoms) if diagnosis.known_symptoms else '- Verify symptoms with patient'}\n"
         )
 
         meds_text = "\n".join(
@@ -190,13 +192,14 @@ def generate_diagnosis(
             for m in treatment.medications
         ) if treatment.medications else "- Supportive care only"
 
+        instructions_text = chr(10).join(f'- {i}' for i in treatment.instructions) if treatment.instructions else '- Follow healthcare provider guidance'
+        warnings_text = chr(10).join(f'- {w}' for w in treatment.warning_signs) if treatment.warning_signs else '- Seek care if symptoms worsen or new symptoms appear'
+
         treatment_text = (
             f"### Medications\n{meds_text}\n\n"
-            f"### Instructions\n"
-            f"{chr(10).join(f'- {i}' for i in treatment.instructions)}\n\n"
-            f"### Warning Signs (Return if)\n"
-            f"{chr(10).join(f'- {w}' for w in treatment.warning_signs)}\n\n"
-            f"**Follow-up:** {treatment.follow_up_days} days\n"
+            f"### Instructions\n{instructions_text}\n\n"
+            f"### Warning Signs (Return if)\n{warnings_text}\n\n"
+            f"**Follow-up:** {treatment.follow_up_days or 3} days\n"
         )
 
         if treatment.requires_referral:
@@ -575,24 +578,30 @@ def _format_result_markdown(result, hp) -> str:
         f"**Confidence:** {result.diagnosis.confidence:.0%}\n"
     )
 
+    lines.append("**Evidence:**")
     if result.diagnosis.supporting_evidence:
-        lines.append("**Evidence:**")
         for ev in result.diagnosis.supporting_evidence[:3]:
             lines.append(f"- {ev}")
-        lines.append("")
+    else:
+        lines.append("- Based on reported symptoms")
+    lines.append("")
 
     if result.diagnosis.differential_diagnoses:
         lines.append(
             "**Consider also:** "
             + ", ".join(result.diagnosis.differential_diagnoses)
         )
-        lines.append("")
+    else:
+        lines.append("**Consider also:** No alternative diagnoses identified")
+    lines.append("")
 
+    lines.append("**Known symptoms of this condition** *(verify with patient):*")
     if result.diagnosis.known_symptoms:
-        lines.append("**Known symptoms of this condition** *(verify with patient):*")
         for sym in result.diagnosis.known_symptoms:
             lines.append(f"- {sym}")
-        lines.append("")
+    else:
+        lines.append("- Verify symptoms with patient")
+    lines.append("")
 
     lines.append("## Treatment Plan")
     if result.treatment_plan.medications:
@@ -603,17 +612,21 @@ def _format_result_markdown(result, hp) -> str:
         lines.append("- Supportive care")
     lines.append("")
 
+    lines.append("**Instructions:**")
     if result.treatment_plan.instructions:
-        lines.append("**Instructions:**")
         for instr in result.treatment_plan.instructions:
             lines.append(f"- {instr}")
-        lines.append("")
+    else:
+        lines.append("- Follow healthcare provider guidance")
+    lines.append("")
 
+    lines.append("**Warning Signs (return if):**")
     if result.treatment_plan.warning_signs:
-        lines.append("**Warning Signs (return if):**")
         for w in result.treatment_plan.warning_signs:
             lines.append(f"- {w}")
-        lines.append("")
+    else:
+        lines.append("- Seek care if symptoms worsen or new symptoms appear")
+    lines.append("")
 
     lines.append("## Drug Safety Check")
     all_meds = result.current_medications + [
@@ -657,10 +670,8 @@ def _format_result_markdown(result, hp) -> str:
         )
     lines.append("")
 
-    if result.treatment_plan.follow_up_days:
-        lines.append(
-            f"**Follow-up:** {result.treatment_plan.follow_up_days} days"
-        )
+    follow_up = result.treatment_plan.follow_up_days or 3
+    lines.append(f"**Follow-up:** {follow_up} days")
 
     return "\n".join(lines)
 
@@ -770,7 +781,6 @@ def create_interface() -> gr.Blocks:
                     label="Ask about this diagnosis",
                     visible=False,
                     height=300,
-                    type="messages",
                 )
                 with gr.Row(visible=False) as chat_input_row:
                     chat_textbox = gr.Textbox(

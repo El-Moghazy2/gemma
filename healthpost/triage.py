@@ -184,7 +184,12 @@ class TriageAgent:
             "duration (e.g. '5 days'). Do NOT leave the treatment list empty.\n"
             "5. Patient care instructions\n"
             "6. Warning signs that require immediate referral\n"
-            "7. Follow-up timeline\n\n"
+            "7. Follow-up timeline\n"
+            "8. Even when no medications are needed, the instructions MUST describe "
+            "how to manage the condition (e.g. rest, warm compress, hydration) and "
+            "the expected recovery timeline (e.g. 'symptoms should improve within 3-5 days').\n"
+            "IMPORTANT: Do NOT leave instructions, warning_signs, known_symptoms, or "
+            "differential_diagnoses empty. Always provide at least 2-3 items for each.\n\n"
             "PATIENT CASE:\n"
         )
         if patient_age:
