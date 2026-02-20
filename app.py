@@ -432,8 +432,13 @@ def run_complete_workflow(
 
     Uses a background thread and queue so that pipeline progress
     streams progressively to the Gradio UI.
+
+    Yields tuples of ``(markdown, visit_result, header_visible,
+    chatbot_visible, input_row_visible)`` so the chat section
+    can appear after workflow completion.
     """
-    yield "**Starting workflow...**"
+    hide = gr.update(visible=False)
+    yield "**Starting workflow...**", None, hide, hide, hide
 
     try:
         hp = get_healthpost()
@@ -447,7 +452,7 @@ def run_complete_workflow(
                 final_symptoms = transcribed
 
         if not final_symptoms:
-            yield "Please provide symptoms (voice or text)"
+            yield "Please provide symptoms (voice or text)", None, hide, hide, hide
             return
 
         images = [medical_image] if medical_image is not None else []
@@ -499,20 +504,61 @@ def run_complete_workflow(
             elif msg_type == "progress":
                 pipeline_steps.append(f"**{key}**: {detail}")
                 progress_md = "\n\n".join(pipeline_steps)
-                yield progress_md
+                yield progress_md, None, hide, hide, hide
 
         thread.join()
 
         if result_holder[1]:
-            yield f"**Error:** {result_holder[1]}"
+            yield f"**Error:** {result_holder[1]}", None, hide, hide, hide
             return
 
         result = result_holder[0]
         main_output = _format_result_markdown(result, hp)
-        yield main_output
+        show = gr.update(visible=True)
+        yield main_output, result, show, show, show
     except Exception as e:
         logger.error("Workflow error: %s", e)
-        yield f"**Error:** {e}"
+        yield f"**Error:** {e}", None, hide, hide, hide
+
+
+def chat_respond(
+    message: str,
+    chat_history: list,
+    conversation_messages: list,
+    visit_result,
+):
+    """Handle a chat message in the post-diagnosis chat.
+
+    Returns updated chatbot history, cleared textbox, and updated
+    conversation messages state.
+    """
+    if not message.strip():
+        return chat_history, "", conversation_messages
+
+    if visit_result is None:
+        return chat_history, "", conversation_messages
+
+    hp = get_healthpost()
+
+    try:
+        response = hp.chat(message, conversation_messages, visit_result)
+    except Exception as e:
+        logger.error("Chat error: %s", e)
+        response = f"Sorry, I encountered an error: {e}"
+
+    chat_history = chat_history or []
+    chat_history.append({"role": "user", "content": message})
+    chat_history.append({"role": "assistant", "content": response})
+
+    if not conversation_messages:
+        from healthpost.core import build_chat_system_prompt
+        conversation_messages = [
+            {"role": "system", "content": build_chat_system_prompt(visit_result)},
+        ]
+    conversation_messages.append({"role": "user", "content": message})
+    conversation_messages.append({"role": "assistant", "content": response})
+
+    return chat_history, "", conversation_messages
 
 
 def _format_result_markdown(result, hp) -> str:
@@ -709,6 +755,33 @@ def create_interface() -> gr.Blocks:
                     label="Complete Visit Summary",
                 )
 
+                # --- Post-diagnosis chat ---
+                visit_result_state = gr.State(None)
+                chat_messages_state = gr.State([])
+
+                chat_header = gr.Markdown(
+                    "---\n### Follow-up Questions\n"
+                    "Ask questions about the diagnosis, dosage, "
+                    "referral criteria, etc.",
+                    visible=False,
+                )
+
+                chat_chatbot = gr.Chatbot(
+                    label="Ask about this diagnosis",
+                    visible=False,
+                    height=300,
+                    type="messages",
+                )
+                with gr.Row(visible=False) as chat_input_row:
+                    chat_textbox = gr.Textbox(
+                        placeholder="e.g., What if the patient is pregnant?",
+                        show_label=False,
+                        scale=4,
+                    )
+                    chat_send_btn = gr.Button(
+                        "Send", variant="primary", scale=1,
+                    )
+
                 for name, btn in demo_btns.items():
                     btn.click(
                         fn=lambda n=name: load_demo_scenario(n),
@@ -725,7 +798,31 @@ def create_interface() -> gr.Blocks:
                         quick_image_type, quick_age,
                         quick_meds_photo, quick_meds_text,
                     ],
-                    outputs=[quick_output],
+                    outputs=[
+                        quick_output, visit_result_state,
+                        chat_header, chat_chatbot, chat_input_row,
+                    ],
+                ).then(
+                    fn=lambda: ([], []),
+                    outputs=[chat_chatbot, chat_messages_state],
+                )
+
+                chat_inputs = [
+                    chat_textbox, chat_chatbot,
+                    chat_messages_state, visit_result_state,
+                ]
+                chat_outputs = [
+                    chat_chatbot, chat_textbox, chat_messages_state,
+                ]
+                chat_send_btn.click(
+                    fn=chat_respond,
+                    inputs=chat_inputs,
+                    outputs=chat_outputs,
+                )
+                chat_textbox.submit(
+                    fn=chat_respond,
+                    inputs=chat_inputs,
+                    outputs=chat_outputs,
                 )
 
             with gr.TabItem("Step-by-Step"):

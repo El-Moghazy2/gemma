@@ -57,6 +57,24 @@ class InferenceBackend(Protocol):
         """
         ...
 
+    def generate_chat(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float = 0.3,
+        max_tokens: int = 512,
+    ) -> str:
+        """Generate a response from a multi-turn conversation.
+
+        Args:
+            messages: Full conversation (system + history + new user message).
+            temperature: Sampling temperature.
+            max_tokens: Maximum tokens to generate.
+
+        Returns:
+            The assistant's response text.
+        """
+        ...
+
 
 class OllamaBackend:
     """Inference backend using Ollama.
@@ -182,6 +200,37 @@ class OllamaBackend:
             tokens_in, tokens_out,
         )
         logger.debug("Ollama structured response: %s", text)
+        return text
+
+
+    def generate_chat(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float = 0.3,
+        max_tokens: int = 512,
+    ) -> str:
+        import ollama
+
+        logger.info(
+            "Ollama chat generating: model=%s, messages=%d, "
+            "max_tokens=%d, temperature=%.2f",
+            self._model, len(messages), max_tokens, temperature,
+        )
+
+        response = ollama.chat(
+            model=self._model,
+            messages=messages,
+            options={"num_predict": max_tokens, "temperature": temperature},
+        )
+
+        text = response.message.content
+        tokens_in = response.prompt_eval_count or 0
+        tokens_out = response.eval_count or 0
+        logger.info(
+            "Ollama chat complete: input_tokens=%d, output_tokens=%d",
+            tokens_in, tokens_out,
+        )
+        logger.debug("Ollama chat response: %s", text)
         return text
 
 

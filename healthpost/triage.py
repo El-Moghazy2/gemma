@@ -172,8 +172,19 @@ class TriageAgent:
     ) -> str:
         """Build a diagnosis prompt. Schema enforcement is handled by Ollama."""
         prompt = (
-            "You are a medical decision support system for a Community Health Worker.\n"
-            "Analyze the patient case and provide a clinical assessment.\n\n"
+            "You are a medical decision support system for a Community Health Worker "
+            "in a rural health post. Analyze the patient case below and provide a "
+            "complete clinical assessment.\n\n"
+            "You MUST include:\n"
+            "1. A primary diagnosis (condition) with confidence level\n"
+            "2. Differential diagnoses to consider\n"
+            "3. Known symptoms of the diagnosed condition\n"
+            "4. A TREATMENT PLAN with specific medications — for each medication "
+            "provide the drug name, dosage (e.g. '500mg twice daily'), and "
+            "duration (e.g. '5 days'). Do NOT leave the treatment list empty.\n"
+            "5. Patient care instructions\n"
+            "6. Warning signs that require immediate referral\n"
+            "7. Follow-up timeline\n\n"
             "PATIENT CASE:\n"
         )
         if patient_age:

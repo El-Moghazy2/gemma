@@ -165,6 +165,48 @@ class PatientVisitResult(BaseModel):
         return "\n".join(lines)
 
 
+def build_chat_system_prompt(visit_result: "PatientVisitResult") -> str:
+    """Build a system prompt from a completed patient visit result."""
+    meds_lines = []
+    for med in visit_result.treatment_plan.medications:
+        dur = f" for {med.duration}" if med.duration else ""
+        meds_lines.append(f"- {med.name}: {med.dosage}{dur}")
+    meds_text = "\n".join(meds_lines) if meds_lines else "- Supportive care only"
+
+    interactions_text = "None detected"
+    if visit_result.drug_interactions:
+        parts = []
+        for i in visit_result.drug_interactions:
+            parts.append(
+                f"- {' + '.join(i.drugs)} ({i.severity}): {i.description}"
+            )
+        interactions_text = "\n".join(parts)
+
+    referral_text = "No referral needed"
+    if visit_result.needs_referral:
+        referral_text = f"REFERRAL NEEDED: {visit_result.referral_reason}"
+
+    safe_text = "Yes" if visit_result.is_safe_to_proceed else "NO - review interactions"
+
+    return (
+        "You are a medical assistant helping a Community Health Worker "
+        "with follow-up questions after a patient visit. Answer clearly "
+        "and concisely. Here is the diagnosis context:\n\n"
+        f"PATIENT SYMPTOMS: {visit_result.symptoms_text}\n\n"
+        f"DIAGNOSIS: {visit_result.diagnosis.condition}\n"
+        f"CONFIDENCE: {visit_result.diagnosis.confidence:.0%}\n"
+        f"SUPPORTING EVIDENCE: {', '.join(visit_result.diagnosis.supporting_evidence)}\n\n"
+        f"TREATMENT PLAN:\n{meds_text}\n\n"
+        f"INSTRUCTIONS: {'; '.join(visit_result.treatment_plan.instructions)}\n\n"
+        f"DRUG INTERACTIONS:\n{interactions_text}\n\n"
+        f"SAFE TO PROCEED: {safe_text}\n"
+        f"REFERRAL STATUS: {referral_text}\n\n"
+        f"CURRENT MEDICATIONS: {', '.join(visit_result.current_medications) or 'None'}\n\n"
+        "Answer the health worker's questions based on this context. "
+        "If you are unsure, say so and recommend consulting a doctor."
+    )
+
+
 class HealthPost:
     """Complete CHW Decision Support System.
 
@@ -183,6 +225,7 @@ class HealthPost:
         self._vision: Optional[MedicalVisionAnalyzer] = None
         self._drug_db: Optional[DrugDatabase] = None
         self._triage: Optional[TriageAgent] = None
+        self._backend = None
         self._visit_graph = None
         self._initialized = False
 
@@ -201,7 +244,8 @@ class HealthPost:
         self._voice = VoiceTranscriber(self.config)
         logger.info("Voice transcriber initialized")
 
-        backend = create_backend(self.config)
+        self._backend = create_backend(self.config)
+        backend = self._backend
         logger.info("Inference backend created: %s", type(backend).__name__)
 
         self._vision = MedicalVisionAnalyzer(self.config, backend=backend)
@@ -440,6 +484,41 @@ class HealthPost:
                 "Failed to get alternative medication: %s", e,
             )
             return None
+
+    def chat(
+        self,
+        message: str,
+        history: list[dict[str, str]],
+        visit_result: "PatientVisitResult",
+    ) -> str:
+        """Send a follow-up question in the context of a completed visit.
+
+        Args:
+            message: The health worker's new question.
+            history: Previous conversation messages (list of role/content dicts).
+            visit_result: The completed patient visit result for context.
+
+        Returns:
+            The assistant's response text.
+        """
+        self.initialize()
+
+        messages: list[dict[str, str]] = []
+
+        if not history:
+            system_prompt = build_chat_system_prompt(visit_result)
+            messages.append({"role": "system", "content": system_prompt})
+        else:
+            messages.extend(history)
+
+        messages.append({"role": "user", "content": message})
+
+        response = self._backend.generate_chat(
+            messages=messages,
+            temperature=0.3,
+            max_tokens=512,
+        )
+        return response
 
     def transcribe_symptoms(self, audio: Any) -> str:
         """Transcribe an audio recording of symptoms."""
