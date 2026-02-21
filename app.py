@@ -50,7 +50,6 @@ DEMO_SCENARIOS = {
         ),
         "age": "adult",
         "meds": "Metformin\nAmlodipine",
-        "image_type": "Other",
     },
     "Skin Condition": {
         "symptoms": (
@@ -60,7 +59,6 @@ DEMO_SCENARIOS = {
         ),
         "age": "child 8 years",
         "meds": "",
-        "image_type": "Skin/Rash",
     },
     "Wound + Drug Interaction": {
         "symptoms": (
@@ -70,7 +68,6 @@ DEMO_SCENARIOS = {
         ),
         "age": "adult",
         "meds": "Warfarin\nMetformin",
-        "image_type": "Wound",
     },
     "Child Diarrhea": {
         "symptoms": (
@@ -80,19 +77,18 @@ DEMO_SCENARIOS = {
         ),
         "age": "child 3 years",
         "meds": "",
-        "image_type": "Other",
     },
 }
 
 
 def load_demo_scenario(
     scenario_name: str,
-) -> Tuple[str, str, str, str]:
+) -> Tuple[str, str, str]:
     """Load a demo scenario into the Quick Workflow form fields."""
     if scenario_name not in DEMO_SCENARIOS:
-        return "", "", "", "Skin/Rash"
+        return "", "", ""
     s = DEMO_SCENARIOS[scenario_name]
-    return s["symptoms"], s["age"], s["meds"], s["image_type"]
+    return s["symptoms"], s["age"], s["meds"]
 
 
 def transcribe_audio(audio: Any) -> Tuple[str, str]:
@@ -426,7 +422,6 @@ def run_complete_workflow(
     audio: Any,
     symptoms_text: str,
     medical_image: Any,
-    image_type: str,
     patient_age: str,
     current_meds_photo: Any,
     current_meds_text: str,
@@ -679,18 +674,447 @@ def _format_result_markdown(result, hp) -> str:
 
 # ── Theme ───────────────────────────────────────────────────────────────────
 theme = gr.themes.Soft(
-    primary_hue=gr.themes.colors.teal,
+    primary_hue=gr.themes.colors.blue,
     secondary_hue=gr.themes.colors.cyan,
     neutral_hue=gr.themes.colors.slate,
     font=gr.themes.GoogleFont("Inter"),
     font_mono=gr.themes.GoogleFont("JetBrains Mono"),
 ).set(
-    button_primary_background_fill="linear-gradient(135deg, *primary_500, *secondary_500)",
-    button_primary_text_color="white",
+    body_background_fill="#F5F7FA",
+    block_background_fill="#FFFFFF",
+    panel_background_fill="#FFFFFF",
+    block_radius="16px",
+    block_shadow="0 1px 3px 0 rgba(0,102,255,0.06), 0 1px 2px -1px rgba(0,102,255,0.04)",
+    button_primary_background_fill="linear-gradient(135deg, #0066FF, #5C6CEB)",
+    button_primary_background_fill_hover="linear-gradient(135deg, #0055DD, #4C5CDB)",
+    button_primary_text_color="#FFFFFF",
     block_title_text_weight="600",
+    block_title_background_fill="transparent",
+    block_title_background_fill_dark="transparent",
+    block_label_background_fill="transparent",
+    block_label_background_fill_dark="transparent",
     block_border_width="1px",
-    block_shadow="0 1px 3px 0 rgb(0 0 0 / 0.1)",
+    input_border_color_focus="#0066FF",
+    input_background_fill="#FAFBFC",
+    input_shadow_focus="0 0 0 3px rgba(0,102,255,0.12)",
+    chatbot_text_size="14px",
 )
+
+# ── Font loading ────────────────────────────────────────────────────────────
+CUSTOM_HEAD = '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+
+# ── Gradient header HTML ────────────────────────────────────────────────────
+HEADER_HTML = """
+<div id="hp-header" style="
+    background: linear-gradient(135deg, #0066FF, #5C6CEB);
+    border-radius: 0;
+    padding: 3.5rem 2rem;
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 1rem;
+    width: 100vw;
+    margin-left: calc(-50vw + 50%);
+">
+    <!-- Decorative blur circles -->
+    <div style="
+        position: absolute; top: -40px; right: -40px;
+        width: 200px; height: 200px;
+        background: rgba(255,255,255,0.2);
+        border-radius: 50%;
+        filter: blur(48px);
+    "></div>
+    <div style="
+        position: absolute; bottom: -30px; left: -30px;
+        width: 150px; height: 150px;
+        background: rgba(255,255,255,0.15);
+        border-radius: 50%;
+        filter: blur(48px);
+    "></div>
+    <div style="text-align: center; position: relative; z-index: 1;">
+        <!-- Icon -->
+        <div style="
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 64px; height: 64px;
+            background: rgba(255,255,255,0.18);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border-radius: 16px;
+            margin-bottom: 1rem;
+        ">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+            </svg>
+        </div>
+        <h1 style="
+            margin: 0; color: #FFFFFF;
+            font-family: 'Inter', sans-serif;
+            font-weight: 800; font-size: 2.5rem;
+        ">HealthPost</h1>
+        <p style="
+            color: rgba(255,255,255,0.85);
+            margin: 0.75rem 0 1.5rem;
+            font-size: 1rem;
+        ">AI-powered clinical decision support &mdash; diagnosis, treatment &amp; drug safety</p>
+        <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
+            <span style="
+                background: rgba(255,255,255,0.18);
+                backdrop-filter: blur(8px);
+                -webkit-backdrop-filter: blur(8px);
+                padding: 6px 16px;
+                border-radius: 20px;
+                font-size: 0.85rem;
+                color: #FFFFFF;
+                font-weight: 500;
+            ">Powered by MedGemma</span>
+            <span style="
+                background: rgba(255,255,255,0.18);
+                backdrop-filter: blur(8px);
+                -webkit-backdrop-filter: blur(8px);
+                padding: 6px 16px;
+                border-radius: 20px;
+                font-size: 0.85rem;
+                color: #FFFFFF;
+                font-weight: 500;
+            ">MedGemma Impact Challenge 2025</span>
+        </div>
+    </div>
+</div>
+"""
+
+# ── Styled footer HTML ─────────────────────────────────────────────────────
+FOOTER_HTML = """
+<div style="
+    text-align: center;
+    padding: 1.25rem 0 0.75rem;
+    margin-top: 1.5rem;
+    border-top: 1px solid #E8E9F3;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.85rem;
+    color: #6B7280;
+">
+    <strong style="color: #1A1F2E;">HealthPost</strong> &mdash;
+    Supporting CHWs to deliver better care &nbsp;|&nbsp;
+    Built with ❤️ for the MedGemma Impact Challenge 2025
+</div>
+"""
+
+# ── Custom CSS ──────────────────────────────────────────────────────────────
+CUSTOM_CSS = """
+/* ── Global ─────────────────────────────────────────────────────────────── */
+.gradio-container {
+    max-width: 1200px !important;
+    margin: 0 auto !important;
+    background: #F5F7FA !important;
+    font-family: 'Inter', sans-serif !important;
+    overflow-x: hidden !important;
+}
+
+/* ── Full-width header ─────────────────────────────────────────────────── */
+#hp-header {
+    width: 100vw !important;
+    margin-left: calc(-50vw + 50%) !important;
+    border-radius: 0 !important;
+}
+h1, h2, h3, h4, h5 {
+    font-family: 'Inter', sans-serif !important;
+}
+
+/* ── Remove ALL label/header highlight backgrounds ─────────────────────── */
+label, label span,
+.gr-group label, .gr-panel label,
+.gr-block label, .gr-block label span,
+.label-wrap, .block-label,
+span.svelte-1gfkn6j,
+.gr-input-label, .gr-box > label,
+[data-testid] label, [data-testid] label span,
+.gradio-container label, .gradio-container label span {
+    background: none !important;
+    background-color: transparent !important;
+    background-image: none !important;
+    color: #1A1F2E !important;
+}
+/* Remove highlighted bar behind section HTML inside groups */
+.gr-group > .gr-html:first-child,
+.gr-group > div > .gr-html,
+.gr-group .prose,
+.gr-group .prose p,
+.gr-group > div,
+.gr-group > div > div,
+.gr-group > div > div > div,
+.gr-group > div:first-child > div {
+    background: none !important;
+    background-color: transparent !important;
+    background-image: none !important;
+}
+/* Nuclear: strip all colored backgrounds inside groups except white cards */
+.gr-group * {
+    background-color: transparent !important;
+}
+.gr-group {
+    background-color: #FFFFFF !important;
+}
+.gr-group textarea,
+.gr-group input[type="text"],
+.gr-group input[type="number"] {
+    background-color: #FAFBFC !important;
+}
+.gr-group button {
+    background-color: revert !important;
+}
+
+/* ── Tabs (frosted glass) ───────────────────────────────────────────────── */
+.tabs > .tab-nav {
+    background: rgba(241,243,248,0.6) !important;
+    backdrop-filter: blur(8px) !important;
+    -webkit-backdrop-filter: blur(8px) !important;
+    border-radius: 12px !important;
+    padding: 4px !important;
+    gap: 4px !important;
+    border: 1px solid #E8E9F3 !important;
+}
+.tabs > .tab-nav > button {
+    border-radius: 8px !important;
+    font-weight: 500 !important;
+    padding: 8px 16px !important;
+    transition: all 0.2s ease !important;
+    border: none !important;
+    background: transparent !important;
+    color: #6B7280 !important;
+}
+.tabs > .tab-nav > button.selected {
+    background: #FFFFFF !important;
+    color: #1A1F2E !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
+    font-weight: 600 !important;
+}
+
+/* ── Panels / Groups ────────────────────────────────────────────────────── */
+.gr-group, .gr-panel, .gr-block {
+    background: #FFFFFF !important;
+    border-radius: 16px !important;
+    box-shadow: 0 1px 3px 0 rgba(0,102,255,0.06), 0 1px 2px -1px rgba(0,102,255,0.04) !important;
+    transition: box-shadow 0.25s ease !important;
+    border-color: #E8E9F3 !important;
+}
+.gr-group:hover, .gr-panel:hover {
+    box-shadow: 0 4px 24px -4px rgba(0,102,255,0.08), 0 1px 4px rgba(26,31,46,0.04) !important;
+}
+
+/* ── Run Workflow button ────────────────────────────────────────────────── */
+#run-workflow-btn {
+    height: 56px !important;
+    background: linear-gradient(135deg, #0066FF, #5C6CEB) !important;
+    color: #FFFFFF !important;
+    font-size: 1rem !important;
+    font-weight: 600 !important;
+    border-radius: 14px !important;
+    border: none !important;
+    box-shadow: 0 4px 14px -2px rgba(0,102,255,0.35) !important;
+    transition: all 0.2s ease !important;
+}
+#run-workflow-btn:hover {
+    box-shadow: 0 6px 20px -2px rgba(0,102,255,0.45) !important;
+    transform: scale(1.01);
+}
+
+/* ── Chat send button ───────────────────────────────────────────────────── */
+#chat-send-btn {
+    background: linear-gradient(135deg, #0066FF, #5C6CEB) !important;
+    color: #FFFFFF !important;
+    border: none !important;
+    border-radius: 12px !important;
+}
+
+/* ── Upload areas ───────────────────────────────────────────────────────── */
+.upload-container, [data-testid="image"] .image-container {
+    border: 2px dashed #E8E9F3 !important;
+    border-radius: 12px !important;
+    transition: all 0.2s ease !important;
+}
+.upload-container:hover, [data-testid="image"] .image-container:hover {
+    border-color: rgba(0,102,255,0.3) !important;
+    background: rgba(230,242,255,0.3) !important;
+}
+
+/* ── Chatbot bubbles ────────────────────────────────────────────────────── */
+#follow-up-chatbot .message.user .message-content {
+    background: linear-gradient(135deg, #0066FF, #5C6CEB) !important;
+    color: #FFFFFF !important;
+    border-radius: 16px 16px 4px 16px !important;
+}
+#follow-up-chatbot .message.bot .message-content {
+    background: #E6F2FF !important;
+    color: #1A1F2E !important;
+    border-radius: 16px 16px 16px 4px !important;
+}
+
+/* ── Diagnostic output (elevated shadow) ────────────────────────────────── */
+#diagnostic-output {
+    box-shadow: 0 8px 32px -8px rgba(0,102,255,0.12), 0 2px 8px rgba(26,31,46,0.04) !important;
+    border-radius: 16px !important;
+    padding: 1.5rem !important;
+}
+#diagnostic-output h2 {
+    font-family: 'Inter', sans-serif !important;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid #E6F2FF;
+    margin-top: 1.5rem;
+}
+
+/* ── About tab ──────────────────────────────────────────────────────────── */
+#about-content {
+    background: #FFFFFF !important;
+    border-radius: 16px !important;
+    padding: 2rem !important;
+}
+#about-content table {
+    width: 100%;
+    border-collapse: collapse;
+}
+#about-content table th {
+    background: #E6F2FF !important;
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 600;
+    color: #1A1F2E;
+}
+#about-content table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid #E8E9F3;
+}
+#about-content code {
+    background: rgba(0,102,255,0.08);
+    color: #0066FF;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 0.85em;
+}
+
+/* ── Inputs ─────────────────────────────────────────────────────────────── */
+textarea, input[type="text"], input[type="number"], .gr-input {
+    border-radius: 12px !important;
+    border: 1px solid #E0E3EA !important;
+    padding: 10px 14px !important;
+    font-family: 'Inter', sans-serif !important;
+    font-size: 0.95rem !important;
+    background: #FAFBFC !important;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+textarea:focus, input:focus, .gr-input:focus {
+    border-color: #0066FF !important;
+    box-shadow: 0 0 0 3px rgba(0,102,255,0.12) !important;
+    background: #FFFFFF !important;
+}
+
+/* ── Audio component ───────────────────────────────────────────────────── */
+.audio-container, [data-testid="audio"] {
+    border-radius: 12px !important;
+}
+[data-testid="audio"] .wrap {
+    border: 2px dashed #E0E3EA !important;
+    border-radius: 12px !important;
+    background: #FAFBFC !important;
+}
+[data-testid="audio"] .tab-nav button,
+[data-testid="audio"] .tab-nav button.selected {
+    border: none !important;
+    border-bottom: none !important;
+    box-shadow: none !important;
+}
+
+/* ── Accordion ──────────────────────────────────────────────────────────── */
+.gr-accordion {
+    border-radius: 16px !important;
+    border-color: #E8E9F3 !important;
+}
+.gr-accordion > .label-wrap {
+    font-size: 1.05rem !important;
+    padding: 12px 16px !important;
+}
+
+/* ── Attachments row: equal height when open, natural when closed ──────── */
+#attachments-row {
+    align-items: flex-start !important;
+}
+#attachments-row > div {
+    display: flex !important;
+    flex-direction: column !important;
+}
+#attachments-row .gr-accordion.open {
+    flex: 1 !important;
+}
+/* When accordion is open, stretch both columns equally */
+#attachments-row:has(.open) {
+    align-items: stretch !important;
+}
+#attachments-row:has(.open) .gr-accordion {
+    height: 100% !important;
+}
+
+/* ── Section header spacing ────────────────────────────────────────────── */
+.gr-group h3, .gr-panel h3 {
+    margin-top: 0.5rem !important;
+}
+
+/* ── Group inner padding ───────────────────────────────────────────────── */
+.gr-group {
+    padding: 1.25rem !important;
+}
+
+/* ── Tab content breathing room ────────────────────────────────────────── */
+.tabs > .tabitem {
+    padding-top: 1rem !important;
+}
+
+/* ── Chat section separator ────────────────────────────────────────────── */
+#follow-up-chatbot {
+    border-top: 1px solid #E8E9F3 !important;
+    padding-top: 1rem !important;
+    margin-top: 0.5rem !important;
+}
+
+/* ── Mobile responsive ─────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .gradio-container {
+        padding: 0 0.5rem !important;
+    }
+    #hp-header {
+        padding: 2rem 1rem !important;
+    }
+    #hp-header h1 {
+        font-size: 1.75rem !important;
+    }
+    #hp-header p {
+        font-size: 0.875rem !important;
+    }
+    /* Stack rows vertically on mobile */
+    #attachments-row {
+        flex-direction: column !important;
+    }
+    #attachments-row > div {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+    .gr-row {
+        flex-wrap: wrap !important;
+    }
+    .gr-group {
+        padding: 0.75rem !important;
+        border-radius: 12px !important;
+    }
+    #run-workflow-btn {
+        height: 48px !important;
+        font-size: 0.9rem !important;
+    }
+    .tabs > .tab-nav {
+        flex-wrap: wrap !important;
+    }
+    .tabs > .tab-nav > button {
+        padding: 6px 12px !important;
+        font-size: 0.85rem !important;
+    }
+}
+"""
 
 
 def create_interface() -> gr.Blocks:
@@ -700,40 +1124,24 @@ def create_interface() -> gr.Blocks:
     ) as app:
 
         # Header
-        gr.Markdown(
-            """
-            <div style="text-align:center; padding: 1.5rem 0;">
-                <h1 style="margin:0;">HealthPost</h1>
-                <p style="opacity:0.7; margin:0.25rem 0 0.5rem;">
-                    AI-powered clinical decision support &mdash; diagnosis, treatment &amp; drug safety
-                </p>
-                <span style="background:rgba(0,128,128,0.1); padding:4px 12px; border-radius:20px; font-size:0.85rem;">
-                    Powered by MedGemma
-                </span>
-                &nbsp;
-                <span style="background:rgba(0,128,128,0.1); padding:4px 12px; border-radius:20px; font-size:0.85rem;">
-                    MedGemma Impact Challenge 2025
-                </span>
-            </div>
-            """
-        )
+        gr.HTML(HEADER_HTML)
 
         with gr.Tabs():
 
-            with gr.Tab("Clinical Workspace"):
+            with gr.Tab("🩺 Clinical Workspace"):
 
                 # Demo loader
                 with gr.Group():
                     demo_dropdown = gr.Dropdown(
                         choices=list(DEMO_SCENARIOS.keys()),
-                        label="Load a demo scenario (optional)",
+                        label="🧪 Load a demo scenario (optional)",
                         value=None,
                         interactive=True,
                     )
 
                 # Patient intake
                 with gr.Group():
-                    gr.Markdown("### Patient Information")
+                    gr.HTML('<p style="font-size:1.15rem; font-weight:600; margin:0.25rem 0 0.75rem; color:#1A1F2E; font-family:Inter,sans-serif;"><span style="color:#0066FF; margin-right:0.5rem;">●</span>Patient Information</p>')
                     quick_symptoms = gr.Textbox(
                         label="Symptoms",
                         placeholder=(
@@ -755,54 +1163,52 @@ def create_interface() -> gr.Blocks:
                         )
 
                 # Optional attachments
-                with gr.Row():
-                    with gr.Accordion(
-                        "Add Medical Image (optional)", open=False,
-                    ):
-                        quick_image = gr.Image(
-                            label="Upload a medical photo",
-                            type="numpy",
-                        )
-                        quick_image_type = gr.Radio(
-                            choices=[
-                                "Skin/Rash", "Wound", "Eyes", "Other",
-                            ],
-                            value="Skin/Rash",
-                            label="Image Type",
-                        )
-                    with gr.Accordion(
-                        "Current Medications (optional)", open=False,
-                    ):
-                        quick_meds_photo = gr.Image(
-                            label="Upload photo of medications",
-                            type="numpy",
-                        )
-                        quick_meds_text = gr.Textbox(
-                            label="Or type medication names",
-                            placeholder="One per line",
-                            lines=3,
-                        )
+                with gr.Row(elem_id="attachments-row"):
+                    with gr.Column():
+                        with gr.Accordion(
+                            "📷 Add Medical Image (optional)", open=False,
+                        ):
+                            quick_image = gr.Image(
+                                label="Upload a medical photo",
+                                type="numpy",
+                            )
+                    with gr.Column():
+                        with gr.Accordion(
+                            "💊 Current Medications (optional)", open=False,
+                        ):
+                            quick_meds_photo = gr.Image(
+                                label="Upload photo of medications",
+                                type="numpy",
+                            )
+                            quick_meds_text = gr.Textbox(
+                                label="Or type medication names",
+                                placeholder="One per line",
+                                lines=3,
+                            )
 
                 # Run button
                 quick_run_btn = gr.Button(
-                    "Run Complete Workflow",
+                    "▶️  Run Complete Workflow",
                     variant="primary",
                     size="lg",
+                    elem_id="run-workflow-btn",
                 )
 
                 # Diagnostic output
                 quick_output = gr.Markdown(
                     label="Diagnostic Report",
+                    elem_id="diagnostic-output",
                 )
 
                 # --- Post-diagnosis chat ---
                 visit_result_state = gr.State(None)
                 chat_messages_state = gr.State([])
 
-                chat_header = gr.Markdown(
-                    "### Follow-up Questions\n"
-                    "_Ask questions about the diagnosis, dosage, "
-                    "referral criteria, etc._",
+                chat_header = gr.HTML(
+                    '<p style="font-size:1.15rem; font-weight:600; margin:0.25rem 0 0.5rem; color:#1A1F2E; font-family:Inter,sans-serif;">'
+                    '<span style="color:#0066FF; margin-right:0.5rem;">●</span>Follow-up Questions</p>'
+                    '<p style="font-size:0.9rem; color:#6B7280; margin:0 0 0.75rem; font-family:Inter,sans-serif;">'
+                    'Ask questions about the diagnosis, dosage, referral criteria, etc.</p>',
                     visible=False,
                 )
 
@@ -811,6 +1217,7 @@ def create_interface() -> gr.Blocks:
                     visible=False,
                     height=300,
                     layout="bubble",
+                    elem_id="follow-up-chatbot",
                 )
                 with gr.Row(visible=False) as chat_input_row:
                     chat_textbox = gr.Textbox(
@@ -820,6 +1227,7 @@ def create_interface() -> gr.Blocks:
                     )
                     chat_send_btn = gr.Button(
                         "Send", variant="primary", scale=1,
+                        elem_id="chat-send-btn",
                     )
 
                 demo_dropdown.change(
@@ -827,7 +1235,7 @@ def create_interface() -> gr.Blocks:
                     inputs=demo_dropdown,
                     outputs=[
                         quick_symptoms, quick_age,
-                        quick_meds_text, quick_image_type,
+                        quick_meds_text,
                     ],
                 )
 
@@ -835,7 +1243,7 @@ def create_interface() -> gr.Blocks:
                     fn=run_complete_workflow,
                     inputs=[
                         quick_audio, quick_symptoms, quick_image,
-                        quick_image_type, quick_age,
+                        quick_age,
                         quick_meds_photo, quick_meds_text,
                     ],
                     outputs=[
@@ -865,10 +1273,11 @@ def create_interface() -> gr.Blocks:
                     outputs=chat_outputs,
                 )
 
-            with gr.Tab("Architecture & About"):
+            with gr.Tab("ℹ️ Architecture & About"):
+              with gr.Group(elem_id="about-content"):
                 gr.Markdown(
                     """
-## System Architecture
+## 🏗️ System Architecture
 
 HealthPost orchestrates **five specialised clinical AI modules** into one seamless workflow:
 
@@ -882,7 +1291,7 @@ HealthPost orchestrates **five specialised clinical AI modules** into one seamle
 
 ---
 
-### Why HealthPost?
+### 🎯 Why HealthPost?
 
 - **One-click workflow** \u2014 all modules run automatically in sequence
 - **Offline-ready** \u2014 designed for low-connectivity health posts
@@ -891,7 +1300,7 @@ HealthPost orchestrates **five specialised clinical AI modules** into one seamle
 
 ---
 
-### Important Disclaimer
+### ⚠️ Important Disclaimer
 
 > This tool is a **decision-support system** for Community Health Workers.
 > It does **not** replace professional medical judgment.
@@ -899,19 +1308,12 @@ HealthPost orchestrates **five specialised clinical AI modules** into one seamle
 
 ---
 
-*Built for the MedGemma Impact Challenge 2025*
+*Built with ❤️ for the MedGemma Impact Challenge 2025*
                     """
                 )
 
         # Footer
-        gr.Markdown(
-            """
-            <div style="text-align:center; padding:1rem 0; opacity:0.6; font-size:0.85rem;">
-                <strong>HealthPost</strong> \u2014 Supporting CHWs to deliver better care &nbsp;|&nbsp;
-                Built for the MedGemma Impact Challenge 2025
-            </div>
-            """
-        )
+        gr.HTML(FOOTER_HTML)
 
     return app
 
@@ -934,4 +1336,6 @@ if __name__ == "__main__":
         server_port=7860,
         share=args.share,
         theme=theme,
+        css=CUSTOM_CSS,
+        head=CUSTOM_HEAD,
     )
