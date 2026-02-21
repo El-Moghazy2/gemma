@@ -33,7 +33,8 @@
       "WebFetch(domain:reference.langchain.com)",
       "Bash(ollama ps:*)",
       "Bash(unzip:*)",
-      "WebFetch(domain:www.gradio.app)"
+      "WebFetch(domain:www.gradio.app)",
+      "Bash(C:/Users/almog/repos/gemma/venv/Scripts/python.exe -c \"import gradio; print\\(gradio.__version__\\)\")"
     ]
   }
 }

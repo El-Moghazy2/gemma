@@ -1121,9 +1121,6 @@ def create_interface() -> gr.Blocks:
     """Build and return the Gradio ``Blocks`` application."""
     with gr.Blocks(
         title="HealthPost \u2014 AI Clinical Decision Support",
-        theme=theme,
-        css=CUSTOM_CSS,
-        head=CUSTOM_HEAD,
     ) as app:
 
         # Header
@@ -1217,7 +1214,6 @@ def create_interface() -> gr.Blocks:
 
                 chat_chatbot = gr.Chatbot(
                     label="Ask about this diagnosis",
-                    type="messages",
                     visible=False,
                     height=300,
                     layout="bubble",
@@ -1339,4 +1335,7 @@ if __name__ == "__main__":
         server_name="0.0.0.0",
         server_port=7860,
         share=args.share,
+        theme=theme,
+        css=CUSTOM_CSS,
+        head=CUSTOM_HEAD,
     )
