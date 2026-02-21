@@ -707,13 +707,9 @@ CUSTOM_HEAD = '<meta name="viewport" content="width=device-width, initial-scale=
 HEADER_HTML = """
 <div id="hp-header" style="
     background: linear-gradient(135deg, #0066FF, #5C6CEB);
-    border-radius: 0;
     padding: 3.5rem 2rem;
-    position: relative;
     overflow: hidden;
     margin-bottom: 1rem;
-    width: 100vw;
-    margin-left: calc(-50vw + 50%);
 ">
     <!-- Decorative blur circles -->
     <div style="
@@ -811,9 +807,17 @@ CUSTOM_CSS = """
 
 /* ── Full-width header ─────────────────────────────────────────────────── */
 #hp-header {
+    position: relative !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
     width: 100vw !important;
-    margin-left: calc(-50vw + 50%) !important;
+    margin-left: 0 !important;
     border-radius: 0 !important;
+}
+/* Ensure Gradio wrappers don't clip the breakout */
+.gradio-container > div,
+.gradio-container > div > div {
+    overflow: visible !important;
 }
 h1, h2, h3, h4, h5 {
     font-family: 'Inter', sans-serif !important;
