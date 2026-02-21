@@ -14,7 +14,6 @@ import threading
 from typing import Any, List, Optional, Tuple
 
 import gradio as gr
-
 from healthpost import Config, HealthPost
 
 logging.basicConfig(level=logging.INFO)
@@ -678,58 +677,90 @@ def _format_result_markdown(result, hp) -> str:
     return "\n".join(lines)
 
 
+# ── Theme ───────────────────────────────────────────────────────────────────
+theme = gr.themes.Soft(
+    primary_hue=gr.themes.colors.teal,
+    secondary_hue=gr.themes.colors.cyan,
+    neutral_hue=gr.themes.colors.slate,
+    font=gr.themes.GoogleFont("Inter"),
+    font_mono=gr.themes.GoogleFont("JetBrains Mono"),
+).set(
+    button_primary_background_fill="linear-gradient(135deg, *primary_500, *secondary_500)",
+    button_primary_text_color="white",
+    block_title_text_weight="600",
+    block_border_width="1px",
+    block_shadow="0 1px 3px 0 rgb(0 0 0 / 0.1)",
+)
+
+
 def create_interface() -> gr.Blocks:
     """Build and return the Gradio ``Blocks`` application."""
     with gr.Blocks(
-        title="HealthPost - CHW Decision Support",
-        theme=gr.themes.Soft(),
+        title="HealthPost \u2014 AI Clinical Decision Support",
     ) as app:
 
+        # Header
         gr.Markdown(
-            "# HealthPost\n"
-            "AI-powered clinical decision support — "
-            "**diagnosis, treatment & drug safety**\n\n---"
+            """
+            <div style="text-align:center; padding: 1.5rem 0;">
+                <h1 style="margin:0;">HealthPost</h1>
+                <p style="opacity:0.7; margin:0.25rem 0 0.5rem;">
+                    AI-powered clinical decision support &mdash; diagnosis, treatment &amp; drug safety
+                </p>
+                <span style="background:rgba(0,128,128,0.1); padding:4px 12px; border-radius:20px; font-size:0.85rem;">
+                    Powered by MedGemma
+                </span>
+                &nbsp;
+                <span style="background:rgba(0,128,128,0.1); padding:4px 12px; border-radius:20px; font-size:0.85rem;">
+                    MedGemma Impact Challenge 2025
+                </span>
+            </div>
+            """
         )
 
         with gr.Tabs():
 
-            with gr.TabItem("Patient Visit"):
+            with gr.Tab("Clinical Workspace"):
 
-                demo_dropdown = gr.Dropdown(
-                    choices=list(DEMO_SCENARIOS.keys()),
-                    label="Load a demo scenario (optional)",
-                    value=None,
-                    interactive=True,
-                )
+                # Demo loader
+                with gr.Group():
+                    demo_dropdown = gr.Dropdown(
+                        choices=list(DEMO_SCENARIOS.keys()),
+                        label="Load a demo scenario (optional)",
+                        value=None,
+                        interactive=True,
+                    )
 
+                # Patient intake
                 with gr.Group():
                     gr.Markdown("### Patient Information")
                     quick_symptoms = gr.Textbox(
                         label="Symptoms",
                         placeholder=(
-                            "Describe the patient's symptoms..."
+                            "Describe the patient's symptoms in detail..."
                         ),
                         lines=4,
                     )
                     with gr.Row():
                         quick_age = gr.Textbox(
-                            label="Patient age",
+                            label="Patient Age",
                             placeholder="e.g., adult, child 5 years",
                             scale=1,
                         )
                         quick_audio = gr.Audio(
-                            label="Or record symptoms",
+                            label="Or record symptoms (MedASR)",
                             sources=["microphone"],
                             type="numpy",
                             scale=1,
                         )
 
+                # Optional attachments
                 with gr.Row():
                     with gr.Accordion(
                         "Add Medical Image (optional)", open=False,
                     ):
                         quick_image = gr.Image(
-                            label="Photo",
+                            label="Upload a medical photo",
                             type="numpy",
                         )
                         quick_image_type = gr.Radio(
@@ -737,13 +768,13 @@ def create_interface() -> gr.Blocks:
                                 "Skin/Rash", "Wound", "Eyes", "Other",
                             ],
                             value="Skin/Rash",
-                            label="Image type",
+                            label="Image Type",
                         )
                     with gr.Accordion(
                         "Current Medications (optional)", open=False,
                     ):
                         quick_meds_photo = gr.Image(
-                            label="Photo of medications",
+                            label="Upload photo of medications",
                             type="numpy",
                         )
                         quick_meds_text = gr.Textbox(
@@ -752,25 +783,26 @@ def create_interface() -> gr.Blocks:
                             lines=3,
                         )
 
+                # Run button
                 quick_run_btn = gr.Button(
                     "Run Complete Workflow",
                     variant="primary",
                     size="lg",
                 )
 
-                with gr.Group():
-                    quick_output = gr.Markdown(
-                        label="Visit Summary",
-                    )
+                # Diagnostic output
+                quick_output = gr.Markdown(
+                    label="Diagnostic Report",
+                )
 
                 # --- Post-diagnosis chat ---
                 visit_result_state = gr.State(None)
                 chat_messages_state = gr.State([])
 
                 chat_header = gr.Markdown(
-                    "---\n### Follow-up Questions\n"
-                    "Ask questions about the diagnosis, dosage, "
-                    "referral criteria, etc.",
+                    "### Follow-up Questions\n"
+                    "_Ask questions about the diagnosis, dosage, "
+                    "referral criteria, etc._",
                     visible=False,
                 )
 
@@ -778,13 +810,13 @@ def create_interface() -> gr.Blocks:
                     label="Ask about this diagnosis",
                     visible=False,
                     height=300,
-                    type="messages",
+                    layout="bubble",
                 )
                 with gr.Row(visible=False) as chat_input_row:
                     chat_textbox = gr.Textbox(
                         placeholder="e.g., What if the patient is pregnant?",
                         show_label=False,
-                        scale=4,
+                        scale=9,
                     )
                     chat_send_btn = gr.Button(
                         "Send", variant="primary", scale=1,
@@ -833,58 +865,52 @@ def create_interface() -> gr.Blocks:
                     outputs=chat_outputs,
                 )
 
-            with gr.TabItem("About"):
+            with gr.Tab("Architecture & About"):
                 gr.Markdown(
-                    "## About HealthPost\n\n"
-                    "**HealthPost** is a decision support tool "
-                    "for Community Health Workers (CHWs) in low-resource "
-                    "settings, powered by Google's MedGemma family of "
-                    "medical AI models.\n\n"
-                    "### Features\n\n"
-                    "| Feature | Model | Description |\n"
-                    "|---------|-------|-------------|\n"
-                    "| Voice Intake | `MedASR` | Transcribe patient "
-                    "symptoms with medical vocabulary |\n"
-                    "| Image Analysis | `MedGemma Vision` | Analyze "
-                    "skin conditions, wounds, eyes |\n"
-                    "| Diagnosis & Treatment | `MedGemma Text` | "
-                    "AI-assisted diagnosis with confidence scores |\n"
-                    "| Drug Safety | `DDInter API` | Drug interaction "
-                    "checking (236K+ interactions) |\n"
-                    "| Referral Guidance | `Rule-based` | Know when to "
-                    "refer to hospital |\n\n"
-                    "### Architecture\n\n"
-                    "HealthPost uses a **LangGraph pipeline** with "
-                    "structured JSON output:\n\n"
-                    "1. **Intake** \u2014 Capture symptoms via voice or text\n"
-                    "2. **Image Analysis** \u2014 Analyze medical photos with MedGemma Vision\n"
-                    "3. **Diagnosis** \u2014 JSON-structured clinical assessment via MedGemma\n"
-                    "4. **Drug Safety** \u2014 Check interactions via DDInter API\n"
-                    "5. **Safety Assessment** \u2014 Determine referral needs\n\n"
-                    "All LLM outputs are parsed as structured JSON using "
-                    "Pydantic models for reliability.\n\n"
-                    "### Technical Details\n\n"
-                    "- **4-bit quantization**: ~4GB VRAM, runs on "
-                    "consumer GPU / Kaggle T4\n"
-                    "- **DDInter API**: 236K+ drug interactions from "
-                    "DrugBank, KEGG, etc.\n"
-                    "- **Pydantic models**: Structured, validated data "
-                    "throughout the pipeline\n"
-                    "- **Gradio UI**: Mobile browser compatible\n"
-                    "- **MedGemma**: Medical AI model with "
-                    "multimodal support\n\n"
-                    "### Safety Notice\n\n"
-                    "This tool is designed to **support** clinical "
-                    "decision-making, not replace it. Always use "
-                    "clinical judgment and refer complex cases to "
-                    "higher levels of care.\n\n"
-                    "---\n\n"
-                    "Built for the **MedGemma Impact Challenge 2025**."
+                    """
+## System Architecture
+
+HealthPost orchestrates **five specialised clinical AI modules** into one seamless workflow:
+
+| Step | Module | Purpose |
+|------|--------|---------|
+| 1 | **MedASR** | Voice \u2192 structured symptom text |
+| 2 | **MedGemma Vision** | Analyse medical images (skin, wounds, eyes) |
+| 3 | **MedGemma Text** | Differential diagnosis + treatment plan |
+| 4 | **DDInter API** | Drug-drug interaction safety check |
+| 5 | **Referral Engine** | Rule-based escalation guidance |
+
+---
+
+### Why HealthPost?
+
+- **One-click workflow** \u2014 all modules run automatically in sequence
+- **Offline-ready** \u2014 designed for low-connectivity health posts
+- **CHW-friendly** \u2014 plain-language output, no medical jargon
+- **Safety-first** \u2014 drug interactions checked before any prescription
+
+---
+
+### Important Disclaimer
+
+> This tool is a **decision-support system** for Community Health Workers.
+> It does **not** replace professional medical judgment.
+> All AI-generated recommendations should be reviewed by a qualified clinician.
+
+---
+
+*Built for the MedGemma Impact Challenge 2025*
+                    """
                 )
 
+        # Footer
         gr.Markdown(
-            "---\n*HealthPost \u2014 Supporting CHWs to deliver "
-            "better care*"
+            """
+            <div style="text-align:center; padding:1rem 0; opacity:0.6; font-size:0.85rem;">
+                <strong>HealthPost</strong> \u2014 Supporting CHWs to deliver better care &nbsp;|&nbsp;
+                Built for the MedGemma Impact Challenge 2025
+            </div>
+            """
         )
 
     return app
@@ -907,4 +933,5 @@ if __name__ == "__main__":
         server_name="0.0.0.0",
         server_port=7860,
         share=args.share,
+        theme=theme,
     )
