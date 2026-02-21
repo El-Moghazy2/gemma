@@ -517,6 +517,10 @@ class HealthPost:
             messages.extend(history)
 
         messages.append({"role": "user", "content": message})
+        messages.append({
+            "role": "assistant",
+            "content": "Medical expert answer:\n",
+        })
 
         response = self._backend.generate_chat(
             messages=messages,

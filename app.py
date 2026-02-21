@@ -687,55 +687,49 @@ def create_interface() -> gr.Blocks:
 
         gr.Markdown(
             "# HealthPost\n"
-            "### CHW Decision Support with MedGemma\n\n"
-            "AI-powered clinical workflow for Community Health Workers: "
-            "**diagnosis, treatment, and drug safety** using "
-            "MedGemma Vision + Text + MedASR.\n\n---"
+            "AI-powered clinical decision support — "
+            "**diagnosis, treatment & drug safety**\n\n---"
         )
 
         with gr.Tabs():
 
-            with gr.TabItem("Quick Workflow"):
-                gr.Markdown(
-                    "### Complete Patient Visit\n"
-                    "Fill in what you have and click "
-                    "**Run Complete Workflow**"
+            with gr.TabItem("Patient Visit"):
+
+                demo_dropdown = gr.Dropdown(
+                    choices=list(DEMO_SCENARIOS.keys()),
+                    label="Load a demo scenario (optional)",
+                    value=None,
+                    interactive=True,
                 )
 
-                with gr.Row():
-                    gr.Markdown("**Load demo scenario:**")
-                with gr.Row():
-                    demo_btns = {}
-                    for name in DEMO_SCENARIOS:
-                        demo_btns[name] = gr.Button(
-                            name, size="sm", variant="secondary",
-                        )
-
-                with gr.Row():
-                    with gr.Column(scale=1):
-                        gr.Markdown("#### 1. Patient Symptoms")
-                        quick_audio = gr.Audio(
-                            label="Record symptoms (optional)",
-                            sources=["microphone"],
-                            type="numpy",
-                        )
-                        quick_symptoms = gr.Textbox(
-                            label="Or type symptoms",
-                            placeholder=(
-                                "Patient has fever for 3 days "
-                                "with headache..."
-                            ),
-                            lines=4,
-                        )
+                with gr.Group():
+                    gr.Markdown("### Patient Information")
+                    quick_symptoms = gr.Textbox(
+                        label="Symptoms",
+                        placeholder=(
+                            "Describe the patient's symptoms..."
+                        ),
+                        lines=4,
+                    )
+                    with gr.Row():
                         quick_age = gr.Textbox(
                             label="Patient age",
                             placeholder="e.g., adult, child 5 years",
+                            scale=1,
+                        )
+                        quick_audio = gr.Audio(
+                            label="Or record symptoms",
+                            sources=["microphone"],
+                            type="numpy",
+                            scale=1,
                         )
 
-                    with gr.Column(scale=1):
-                        gr.Markdown("#### 2. Medical Image (optional)")
+                with gr.Row():
+                    with gr.Accordion(
+                        "Add Medical Image (optional)", open=False,
+                    ):
                         quick_image = gr.Image(
-                            label="Photo of skin/wound/eyes",
+                            label="Photo",
                             type="numpy",
                         )
                         quick_image_type = gr.Radio(
@@ -745,16 +739,16 @@ def create_interface() -> gr.Blocks:
                             value="Skin/Rash",
                             label="Image type",
                         )
-
-                    with gr.Column(scale=1):
-                        gr.Markdown("#### 3. Current Medications")
+                    with gr.Accordion(
+                        "Current Medications (optional)", open=False,
+                    ):
                         quick_meds_photo = gr.Image(
-                            label="Photo of current meds (optional)",
+                            label="Photo of medications",
                             type="numpy",
                         )
                         quick_meds_text = gr.Textbox(
-                            label="Or list current medications",
-                            placeholder="Paracetamol\nAmoxicillin",
+                            label="Or type medication names",
+                            placeholder="One per line",
                             lines=3,
                         )
 
@@ -764,9 +758,10 @@ def create_interface() -> gr.Blocks:
                     size="lg",
                 )
 
-                quick_output = gr.Markdown(
-                    label="Complete Visit Summary",
-                )
+                with gr.Group():
+                    quick_output = gr.Markdown(
+                        label="Visit Summary",
+                    )
 
                 # --- Post-diagnosis chat ---
                 visit_result_state = gr.State(None)
@@ -795,14 +790,14 @@ def create_interface() -> gr.Blocks:
                         "Send", variant="primary", scale=1,
                     )
 
-                for name, btn in demo_btns.items():
-                    btn.click(
-                        fn=lambda n=name: load_demo_scenario(n),
-                        outputs=[
-                            quick_symptoms, quick_age,
-                            quick_meds_text, quick_image_type,
-                        ],
-                    )
+                demo_dropdown.change(
+                    fn=load_demo_scenario,
+                    inputs=demo_dropdown,
+                    outputs=[
+                        quick_symptoms, quick_age,
+                        quick_meds_text, quick_image_type,
+                    ],
+                )
 
                 quick_run_btn.click(
                     fn=run_complete_workflow,
@@ -836,328 +831,6 @@ def create_interface() -> gr.Blocks:
                     fn=chat_respond,
                     inputs=chat_inputs,
                     outputs=chat_outputs,
-                )
-
-            with gr.TabItem("Step-by-Step"):
-
-                with gr.Accordion(
-                    "Step 1: INTAKE - Capture Symptoms", open=True,
-                ):
-                    with gr.Row():
-                        with gr.Column():
-                            intake_audio = gr.Audio(
-                                label=(
-                                    "Record patient's symptom "
-                                    "description"
-                                ),
-                                sources=["microphone"],
-                                type="numpy",
-                            )
-                            transcribe_btn = gr.Button(
-                                "Transcribe Audio",
-                            )
-                            transcribe_source = gr.Markdown("")
-
-                        with gr.Column():
-                            intake_symptoms = gr.Textbox(
-                                label="Symptoms (transcribed or typed)",
-                                placeholder=(
-                                    "Patient has high fever for "
-                                    "3 days..."
-                                ),
-                                lines=4,
-                            )
-                            intake_age = gr.Textbox(
-                                label="Patient age (optional)",
-                                placeholder=(
-                                    "adult / child 5 years / infant"
-                                ),
-                            )
-
-                    transcribe_btn.click(
-                        fn=transcribe_audio,
-                        inputs=intake_audio,
-                        outputs=[intake_symptoms, transcribe_source],
-                    )
-
-                with gr.Accordion(
-                    "Step 2: DIAGNOSE - Analyze Images", open=False,
-                ):
-                    with gr.Row():
-                        with gr.Column():
-                            diagnose_image = gr.Image(
-                                label="Upload medical image",
-                                type="numpy",
-                            )
-                            diagnose_type = gr.Radio(
-                                choices=[
-                                    "Skin/Rash", "Wound", "Eyes",
-                                    "Other",
-                                ],
-                                value="Skin/Rash",
-                                label="What are you photographing?",
-                            )
-                            analyze_btn = gr.Button("Analyze Image")
-
-                        with gr.Column():
-                            diagnose_findings = gr.Markdown(
-                                label="Visual Findings",
-                            )
-
-                    analyze_btn.click(
-                        fn=analyze_medical_image,
-                        inputs=[diagnose_image, diagnose_type],
-                        outputs=diagnose_findings,
-                    )
-
-                with gr.Accordion(
-                    "Step 3: PRESCRIBE - Get Treatment Plan",
-                    open=False,
-                ):
-                    prescribe_btn = gr.Button(
-                        "Generate Diagnosis & Treatment",
-                        variant="primary",
-                    )
-
-                    with gr.Row():
-                        prescribe_diagnosis = gr.Markdown(
-                            label="Diagnosis",
-                        )
-                        prescribe_treatment = gr.Markdown(
-                            label="Treatment",
-                        )
-                        prescribe_referral = gr.Markdown(
-                            label="Referral",
-                        )
-
-                    with gr.Accordion(
-                        "Pipeline Trace", open=False,
-                    ):
-                        prescribe_trace = gr.Markdown(
-                            label="Pipeline Trace",
-                            value="*Run diagnosis to see trace*",
-                            min_height=400,
-                        )
-
-                    diagnose_findings_text = gr.Textbox(visible=False)
-
-                    prescribe_btn.click(
-                        fn=generate_diagnosis,
-                        inputs=[
-                            intake_symptoms, diagnose_findings_text,
-                            intake_age,
-                        ],
-                        outputs=[
-                            prescribe_diagnosis, prescribe_treatment,
-                            prescribe_referral, prescribe_trace,
-                        ],
-                    )
-
-                with gr.Accordion(
-                    "Step 4: DISPENSE - Safety Check", open=False,
-                ):
-                    gr.Markdown(
-                        "Check for drug interactions before dispensing"
-                    )
-
-                    with gr.Row():
-                        with gr.Column():
-                            dispense_photo = gr.Image(
-                                label=(
-                                    "Photo of patient's current "
-                                    "medications"
-                                ),
-                                type="numpy",
-                            )
-                            extract_meds_btn = gr.Button(
-                                "Extract Medications from Photo",
-                            )
-
-                        with gr.Column():
-                            dispense_current = gr.Textbox(
-                                label="Current Medications",
-                                placeholder="One medication per line",
-                                lines=4,
-                            )
-                            dispense_proposed = gr.Textbox(
-                                label="Proposed New Medications",
-                                placeholder="One medication per line",
-                                lines=4,
-                            )
-
-                    extract_meds_btn.click(
-                        fn=extract_medications_from_photo,
-                        inputs=dispense_photo,
-                        outputs=dispense_current,
-                    )
-
-                    check_btn = gr.Button(
-                        "Check Drug Interactions", variant="primary",
-                    )
-                    interaction_result = gr.Markdown(
-                        label="Safety Check Result",
-                    )
-
-                    interactions_state = gr.State([])
-
-                    interaction_selector = gr.Dropdown(
-                        label="Select interaction to resolve",
-                        choices=[],
-                        visible=False,
-                    )
-                    get_alternative_btn = gr.Button(
-                        "Get Alternative Medication", visible=False,
-                    )
-                    alternative_output = gr.Markdown(
-                        label="Suggested Alternative", visible=False,
-                    )
-
-                    check_btn.click(
-                        fn=check_drug_interactions,
-                        inputs=[dispense_current, dispense_proposed],
-                        outputs=[
-                            interaction_result, interactions_state,
-                            interaction_selector,
-                        ],
-                    ).then(
-                        fn=update_interaction_ui,
-                        inputs=[
-                            interaction_result, interactions_state,
-                            interaction_selector,
-                        ],
-                        outputs=[
-                            interaction_selector,
-                            get_alternative_btn, alternative_output,
-                        ],
-                    )
-
-                    get_alternative_btn.click(
-                        fn=get_alternative_for_interaction,
-                        inputs=[
-                            interaction_selector, interactions_state,
-                            dispense_current, dispense_proposed,
-                        ],
-                        outputs=alternative_output,
-                    ).then(
-                        fn=lambda: gr.update(visible=True),
-                        outputs=alternative_output,
-                    )
-
-            with gr.TabItem("Drug Reference"):
-                gr.Markdown(
-                    "### Drug Information & Interaction Checker\n"
-                    "Look up medications and check for interactions"
-                )
-
-                with gr.Row():
-                    with gr.Column():
-                        drug_search = gr.Textbox(
-                            label="Search for a drug",
-                            placeholder=(
-                                "e.g., Paracetamol, Amoxicillin"
-                            ),
-                        )
-                        search_btn = gr.Button("Search")
-
-                    with gr.Column():
-                        drug_info = gr.Markdown(
-                            label="Drug Information",
-                        )
-
-                def search_drug(query: str) -> str:
-                    if not query.strip():
-                        return ""
-                    try:
-                        hp = get_healthpost()
-                        info = hp.drug_db.get_drug_info(query)
-                        if not info:
-                            return (
-                                f"No information found for '{query}'"
-                            )
-                        return (
-                            f"### {info.name} ({info.generic_name})\n\n"
-                            f"**Class:** {info.drug_class}\n\n"
-                            f"**Common Uses:**\n"
-                            f"{chr(10).join(f'- {u}' for u in info.common_uses)}\n\n"
-                            f"**Contraindications:**\n"
-                            f"{chr(10).join(f'- {c}' for c in info.contraindications) if info.contraindications else '- None listed'}\n\n"
-                            f"**Dosages:**\n"
-                            f"{chr(10).join(f'- {k}: {v}' for k, v in info.common_doses.items())}\n"
-                        )
-                    except Exception as e:
-                        return f"Error: {e}"
-
-                search_btn.click(
-                    fn=search_drug,
-                    inputs=drug_search,
-                    outputs=drug_info,
-                )
-
-                gr.Markdown("---\n### Quick Interaction Check")
-
-                with gr.Row():
-                    interact_meds = gr.Textbox(
-                        label=(
-                            "Enter all medications (one per line)"
-                        ),
-                        placeholder=(
-                            "Paracetamol\nAmoxicillin\nMetformin"
-                        ),
-                        lines=6,
-                    )
-                    interact_result = gr.Markdown(
-                        label="Interaction Results",
-                    )
-
-                quick_interactions_state = gr.State([])
-                quick_interaction_selector = gr.Dropdown(
-                    label="Select interaction to resolve",
-                    choices=[],
-                    visible=False,
-                )
-                quick_get_alternative_btn = gr.Button(
-                    "Get Alternative Medication", visible=False,
-                )
-                quick_alternative_output = gr.Markdown(
-                    label="Suggested Alternative", visible=False,
-                )
-
-                interact_btn = gr.Button("Check Interactions")
-
-                interact_btn.click(
-                    fn=lambda x: check_drug_interactions(x, ""),
-                    inputs=interact_meds,
-                    outputs=[
-                        interact_result, quick_interactions_state,
-                        quick_interaction_selector,
-                    ],
-                ).then(
-                    fn=update_interaction_ui,
-                    inputs=[
-                        interact_result, quick_interactions_state,
-                        quick_interaction_selector,
-                    ],
-                    outputs=[
-                        quick_interaction_selector,
-                        quick_get_alternative_btn,
-                        quick_alternative_output,
-                    ],
-                )
-
-                quick_get_alternative_btn.click(
-                    fn=lambda sel, interactions, meds: (
-                        get_alternative_for_interaction(
-                            sel, interactions, meds, "",
-                        )
-                    ),
-                    inputs=[
-                        quick_interaction_selector,
-                        quick_interactions_state, interact_meds,
-                    ],
-                    outputs=quick_alternative_output,
-                ).then(
-                    fn=lambda: gr.update(visible=True),
-                    outputs=quick_alternative_output,
                 )
 
             with gr.TabItem("About"):
