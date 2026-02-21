@@ -708,7 +708,6 @@ HEADER_HTML = """
 <div id="hp-header" style="
     background: linear-gradient(135deg, #0066FF, #5C6CEB);
     padding: 3.5rem 2rem;
-    overflow: hidden;
     margin-bottom: 1rem;
 ">
     <!-- Decorative blur circles -->
@@ -808,16 +807,11 @@ CUSTOM_CSS = """
 /* ── Full-width header ─────────────────────────────────────────────────── */
 #hp-header {
     position: relative !important;
-    left: 50% !important;
-    transform: translateX(-50%) !important;
-    width: 100vw !important;
-    margin-left: 0 !important;
     border-radius: 0 !important;
-}
-/* Ensure Gradio wrappers don't clip the breakout */
-.gradio-container > div,
-.gradio-container > div > div {
-    overflow: visible !important;
+    margin-left: -1000px !important;
+    margin-right: -1000px !important;
+    padding-left: 1000px !important;
+    padding-right: 1000px !important;
 }
 h1, h2, h3, h4, h5 {
     font-family: 'Inter', sans-serif !important;
