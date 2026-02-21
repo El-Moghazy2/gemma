@@ -859,6 +859,34 @@ span.svelte-1gfkn6j,
 .gr-group button {
     background-color: revert !important;
 }
+/* Dropdown menu needs a solid background */
+.gr-group ul[role="listbox"],
+.gr-group [data-testid="dropdown"] ul,
+.gr-group .dropdown-menu,
+.gr-group ul.options,
+.gr-group div[role="listbox"],
+.gr-group .secondary-wrap ul,
+.gr-group .wrap ul {
+    background-color: #FFFFFF !important;
+}
+.gr-group ul[role="listbox"] li,
+.gr-group [data-testid="dropdown"] ul li,
+.gr-group .dropdown-menu li,
+.gr-group ul.options li,
+.gr-group div[role="listbox"] > div,
+.gr-group .secondary-wrap ul li,
+.gr-group .wrap ul li {
+    background-color: #FFFFFF !important;
+    color: #1A1F2E !important;
+}
+.gr-group ul[role="listbox"] li:hover,
+.gr-group [data-testid="dropdown"] ul li:hover,
+.gr-group ul.options li:hover,
+.gr-group div[role="listbox"] > div:hover,
+.gr-group .secondary-wrap ul li:hover,
+.gr-group .wrap ul li:hover {
+    background-color: #E6F2FF !important;
+}
 
 /* ── Tabs (frosted glass) ───────────────────────────────────────────────── */
 .tabs > .tab-nav {
