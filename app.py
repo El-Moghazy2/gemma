@@ -8,6 +8,11 @@ Supports the complete patient visit workflow:
 4. **DISPENSE** -- Drug safety check (DDInter).
 """
 
+import os
+
+# Use persistent storage for model cache (survives Space restarts on T4)
+os.environ.setdefault("HF_HOME", "/data/hf_cache")
+
 import logging
 from typing import Any, List, Optional, Tuple
 
@@ -1420,7 +1425,11 @@ if __name__ == "__main__":
     print("=" * 50)
     print("HealthPost - CHW Decision Support System")
     print("=" * 50)
-    print("\nStarting application...")
+    print("\nPre-loading models...")
+    get_healthpost().warmup()
+    print("Models ready!\n")
+
+    print("Starting application...")
 
     application = create_interface()
     application.launch(

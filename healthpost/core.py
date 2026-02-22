@@ -266,6 +266,15 @@ class HealthPost:
         self._initialized = True
         logger.info("HealthPost fully initialized")
 
+    def warmup(self) -> None:
+        """Pre-load all models into GPU memory."""
+        self.initialize()
+        if self._backend:
+            self._backend._ensure_loaded()
+        if self._voice:
+            self._voice._load_model()
+        logger.info("All models pre-loaded")
+
     @property
     def voice(self) -> VoiceTranscriber:
         """Lazily initialized voice transcriber."""
