@@ -1,8 +1,16 @@
 # HealthPost - CHW Decision Support System
-# Requires MedGemma via Ollama
+# Requires MedGemma via HF Transformers
 
-# Ollama client
-ollama>=0.4.0
+# Inference
+transformers>=4.45.0
+torch>=2.1.0
+accelerate>=0.25.0
+bitsandbytes>=0.41.0
+sentencepiece>=0.2.0
+protobuf>=3.20.0
+
+# HF Spaces ZeroGPU
+spaces>=0.30.0
 
 # Data validation
 pydantic>=2.0.0

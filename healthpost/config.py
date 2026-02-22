@@ -9,7 +9,10 @@ class Config:
     """Application-wide configuration for HealthPost.
 
     Attributes:
-        ollama_model: Ollama model tag for MedGemma.
+        hf_model_id: Hugging Face model ID for MedGemma.
+        medasr_model_id: Hugging Face model ID for MedASR.
+        device: Torch device string (ZeroGPU assigns GPU dynamically).
+        hf_use_4bit: Whether to use 4-bit quantization to fit in ZeroGPU VRAM.
         data_dir: Directory containing static data assets.
         max_new_tokens: Maximum tokens per generation call.
         temperature: Sampling temperature for inference.
@@ -18,7 +21,10 @@ class Config:
         sample_rate: Expected audio sample rate in Hz.
     """
 
-    ollama_model: str = "hf.co/unsloth/medgemma-1.5-4b-it-GGUF:latest"
+    hf_model_id: str = "google/medgemma-4b-it"
+    medasr_model_id: str = "google/medasr"
+    device: str = "cpu"
+    hf_use_4bit: bool = True
 
     data_dir: Path = field(
         default_factory=lambda: Path(__file__).parent.parent / "data"

@@ -9,12 +9,19 @@ Supports the complete patient visit workflow:
 """
 
 import logging
-import queue
-import threading
 from typing import Any, List, Optional, Tuple
 
 import gradio as gr
 from healthpost import Config, HealthPost
+
+try:
+    import spaces
+except ImportError:
+    class spaces:  # type: ignore[no-redef]
+        """No-op fallback so the app runs without HF Spaces infrastructure."""
+        @staticmethod
+        def GPU(duration: int = 60):
+            return lambda fn: fn
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -91,6 +98,14 @@ def load_demo_scenario(
     return s["symptoms"], s["age"], s["meds"]
 
 
+@spaces.GPU(duration=180)
+def _transcribe_audio_gpu(hp: HealthPost, audio: Any) -> Tuple[str, str]:
+    """GPU-accelerated transcription helper."""
+    text = hp.transcribe_symptoms(audio)
+    source = hp.voice.source_label
+    return text, f"*{source}*"
+
+
 def transcribe_audio(audio: Any) -> Tuple[str, str]:
     """Transcribe an audio recording of symptoms."""
     if audio is None:
@@ -98,12 +113,22 @@ def transcribe_audio(audio: Any) -> Tuple[str, str]:
 
     try:
         hp = get_healthpost()
-        text = hp.transcribe_symptoms(audio)
-        source = hp.voice.source_label
-        return text, f"*{source}*"
+        return _transcribe_audio_gpu(hp, audio)
     except Exception as e:
         logger.error("Transcription error: %s", e)
         return f"[Error transcribing audio: {e}]", ""
+
+
+@spaces.GPU(duration=180)
+def _analyze_image_gpu(hp: HealthPost, image: Any, image_type: str) -> dict:
+    """GPU-accelerated image analysis helper."""
+    if image_type == "Skin/Rash":
+        return hp.vision.analyze_skin_condition(image)
+    elif image_type == "Wound":
+        return hp.vision.analyze_wound(image)
+    else:
+        findings = hp.vision.analyze_medical_image(image)
+        return {"findings": findings}
 
 
 def analyze_medical_image(image: Any, image_type: str) -> str:
@@ -115,13 +140,7 @@ def analyze_medical_image(image: Any, image_type: str) -> str:
         hp = get_healthpost()
         badge = _get_backend_badge("vision")
 
-        if image_type == "Skin/Rash":
-            result = hp.vision.analyze_skin_condition(image)
-        elif image_type == "Wound":
-            result = hp.vision.analyze_wound(image)
-        else:
-            findings = hp.vision.analyze_medical_image(image)
-            result = {"findings": findings}
+        result = _analyze_image_gpu(hp, image, image_type)
 
         header = f"**Powered by:** {badge}\n\n---\n\n"
 
@@ -135,6 +154,16 @@ def analyze_medical_image(image: Any, image_type: str) -> str:
     except Exception as e:
         logger.error("Image analysis error: %s", e)
         return f"[Error analyzing image: {e}]"
+
+
+@spaces.GPU(duration=180)
+def _diagnose_gpu(hp: HealthPost, symptoms_text: str, findings_list: List[str], patient_age: Optional[str]):
+    """GPU-accelerated diagnosis helper."""
+    return hp.triage.diagnose_and_treat(
+        symptoms=symptoms_text,
+        visual_findings=findings_list,
+        patient_age=patient_age,
+    )
 
 
 def generate_diagnosis(
@@ -163,10 +192,9 @@ def generate_diagnosis(
                 if line:
                     findings_list.append(line)
 
-        diagnosis, treatment = hp.triage.diagnose_and_treat(
-            symptoms=symptoms_text,
-            visual_findings=findings_list,
-            patient_age=patient_age if patient_age else None,
+        diagnosis, treatment = _diagnose_gpu(
+            hp, symptoms_text, findings_list,
+            patient_age if patient_age else None,
         )
 
         diagnosis_text = (
@@ -418,6 +446,23 @@ def update_interaction_ui(
     )
 
 
+@spaces.GPU(duration=180)
+def _run_pipeline_gpu(
+    hp: HealthPost,
+    symptoms: str,
+    images: List[Any],
+    meds: List[str],
+    age: Optional[str],
+):
+    """GPU-accelerated patient visit pipeline."""
+    return hp.patient_visit(
+        symptoms_text=symptoms,
+        images=images,
+        existing_meds_list=meds,
+        patient_age=age,
+    )
+
+
 def run_complete_workflow(
     audio: Any,
     symptoms_text: str,
@@ -427,9 +472,6 @@ def run_complete_workflow(
     current_meds_text: str,
 ):
     """Run the complete patient visit workflow.
-
-    Uses a background thread and queue so that pipeline progress
-    streams progressively to the Gradio UI.
 
     Yields tuples of ``(markdown, visit_result, header_visible,
     chatbot_visible, input_row_visible)`` so the chat section
@@ -464,59 +506,25 @@ def run_complete_workflow(
                 if line:
                     current_meds.append(line)
 
-        progress_queue: queue.Queue = queue.Queue()
-        result_holder: List = [None, None]  # [result, error]
+        yield "**Running AI analysis...**", None, hide, hide, hide
 
-        def on_progress(step_name, detail):
-            progress_queue.put(("progress", step_name, detail))
+        result = _run_pipeline_gpu(
+            hp, final_symptoms, images, current_meds,
+            patient_age if patient_age else None,
+        )
 
-        def run_pipeline():
-            try:
-                result = hp.patient_visit(
-                    symptoms_text=final_symptoms,
-                    images=images,
-                    existing_meds_list=current_meds,
-                    patient_age=patient_age if patient_age else None,
-                    on_progress=on_progress,
-                )
-                result_holder[0] = result
-            except Exception as e:
-                result_holder[1] = e
-            finally:
-                progress_queue.put(("done", None, None))
-
-        thread = threading.Thread(target=run_pipeline)
-        thread.start()
-
-        pipeline_steps: List[str] = []
-
-        while True:
-            try:
-                msg = progress_queue.get(timeout=300)
-            except queue.Empty:
-                break
-            msg_type, key, detail = msg
-
-            if msg_type == "done":
-                break
-            elif msg_type == "progress":
-                pipeline_steps.append(f"**{key}**: {detail}")
-                progress_md = "\n\n".join(pipeline_steps)
-                yield progress_md, None, hide, hide, hide
-
-        thread.join()
-
-        if result_holder[1]:
-            yield f"**Error:** {result_holder[1]}", None, hide, hide, hide
-            return
-
-        result = result_holder[0]
         main_output = _format_result_markdown(result, hp)
         show = gr.update(visible=True)
         yield main_output, result, show, show, show
     except Exception as e:
         logger.error("Workflow error: %s", e)
         yield f"**Error:** {e}", None, hide, hide, hide
+
+
+@spaces.GPU(duration=180)
+def _chat_respond_gpu(hp: HealthPost, message: str, conversation_messages: list, visit_result) -> str:
+    """GPU-accelerated chat response helper."""
+    return hp.chat(message, conversation_messages, visit_result)
 
 
 def chat_respond(
@@ -539,7 +547,7 @@ def chat_respond(
     hp = get_healthpost()
 
     try:
-        response = hp.chat(message, conversation_messages, visit_result)
+        response = _chat_respond_gpu(hp, message, conversation_messages, visit_result)
     except Exception as e:
         logger.error("Chat error: %s", e)
         response = f"Sorry, I encountered an error: {e}"
