@@ -110,7 +110,6 @@ class TransformersBackend:
 
         load_kwargs: dict[str, Any] = {
             "torch_dtype": torch.bfloat16,
-            "device_map": "auto",
         }
 
         if self.config.hf_use_4bit:
@@ -157,7 +156,8 @@ class TransformersBackend:
         if images:
             processor_kwargs["images"] = images
 
-        inputs = self._processor(**processor_kwargs).to(self._model.device)
+        device = next(self._model.parameters()).device
+        inputs = self._processor(**processor_kwargs).to(device)
         input_len = inputs["input_ids"].shape[-1]
 
         with torch.inference_mode():
