@@ -887,8 +887,12 @@ span.svelte-1gfkn6j,
     background-color: transparent !important;
     background-image: none !important;
 }
-/* Nuclear: strip all colored backgrounds inside groups except white cards and accordion headers */
-.gr-group *:not(.label-wrap):not(.label-wrap *) {
+/* Strip colored backgrounds from labels/headers inside groups */
+.gr-group > div > div,
+.gr-group .prose,
+.gr-group .prose p,
+.gr-group label,
+.gr-group label span {
     background-color: transparent !important;
 }
 .gr-group {
