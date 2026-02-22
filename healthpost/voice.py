@@ -1,7 +1,6 @@
 """Voice transcription module for medical speech-to-text.
 
-Tries MedASR first; falls back to Whisper if MedASR is unavailable or
-incompatible with the installed transformers version.
+Uses OpenAI Whisper-small for reliable speech-to-text on HF Spaces.
 """
 
 import logging
@@ -14,6 +13,8 @@ from .config import Config
 
 logger = logging.getLogger(__name__)
 
+WHISPER_MODEL_ID = "openai/whisper-small"
+
 
 class VoiceTranscriber:
     """Medical speech-to-text transcriber.
@@ -25,12 +26,11 @@ class VoiceTranscriber:
     def __init__(self, config: Config) -> None:
         self.config = config
         self._pipe = None
-        self._backend_name: str = ""
 
     @property
     def source_label(self) -> str:
         """Human-readable label for the transcription backend."""
-        return f"Transcribed via {self._backend_name}"
+        return f"Transcribed via Whisper ({WHISPER_MODEL_ID})"
 
     def _load_model(self) -> None:
         if self._pipe is not None:
@@ -39,32 +39,16 @@ class VoiceTranscriber:
         import torch
         from transformers import pipeline
 
-        device = self.config.device
-        dtype = torch.float16 if device == "cuda" else torch.float32
+        dtype = torch.float16 if self.config.device == "cuda" else torch.float32
 
-        # Try MedASR first, fall back to Whisper
-        try:
-            logger.info("Trying MedASR (%s)...", self.config.medasr_model_id)
-            self._pipe = pipeline(
-                "automatic-speech-recognition",
-                model=self.config.medasr_model_id,
-                torch_dtype=dtype,
-                device=device,
-                trust_remote_code=True,
-            )
-            self._backend_name = f"MedASR ({self.config.medasr_model_id})"
-            logger.info("MedASR loaded successfully")
-        except Exception as exc:
-            logger.warning("MedASR failed (%s), falling back to Whisper", exc)
-            whisper_id = "openai/whisper-small"
-            self._pipe = pipeline(
-                "automatic-speech-recognition",
-                model=whisper_id,
-                torch_dtype=dtype,
-                device=device,
-            )
-            self._backend_name = f"Whisper ({whisper_id})"
-            logger.info("Whisper loaded successfully")
+        logger.info("Loading Whisper (%s)...", WHISPER_MODEL_ID)
+        self._pipe = pipeline(
+            "automatic-speech-recognition",
+            model=WHISPER_MODEL_ID,
+            torch_dtype=dtype,
+            device_map="auto",
+        )
+        logger.info("Whisper loaded successfully")
 
     def transcribe(
         self,

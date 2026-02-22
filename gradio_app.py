@@ -188,7 +188,7 @@ with gr.Blocks(theme=theme, title="HealthPost — AI Clinical Decision Support")
                         placeholder="e.g., adult, child 5 years",
                     )
                     audio_input = gr.Audio(
-                        label="Or record symptoms (MedASR)",
+                        label="Or record symptoms (Whisper)",
                         sources=["microphone"],
                         type="filepath",
                     )
@@ -244,7 +244,7 @@ HealthPost orchestrates **five specialised clinical AI modules** into one seamle
 
 | Step | Module | Purpose |
 |------|--------|---------|
-| 1 | **MedASR** | Voice → structured symptom text |
+| 1 | **Whisper** | Voice → structured symptom text |
 | 2 | **MedGemma Vision** | Analyse medical images (skin, wounds, eyes) |
 | 3 | **MedGemma Text** | Differential diagnosis + treatment plan |
 | 4 | **DDInter API** | Drug-drug interaction safety check |

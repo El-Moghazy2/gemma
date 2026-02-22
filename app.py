@@ -2,7 +2,7 @@
 
 Supports the complete patient visit workflow:
 
-1. **INTAKE** -- Voice/text symptom capture (MedASR).
+1. **INTAKE** -- Voice/text symptom capture (Whisper).
 2. **DIAGNOSE** -- Image analysis (MedGemma Vision).
 3. **PRESCRIBE** -- AI-generated treatment (MedGemma Text).
 4. **DISPENSE** -- Drug safety check (DDInter).
@@ -43,7 +43,7 @@ def _get_backend_badge(component: str) -> str:
     badges = {
         "triage": "`MedGemma Text`",
         "vision": "`MedGemma Vision`",
-        "voice": "`MedASR`",
+        "voice": "`Whisper`",
     }
     return badges.get(component, "`Unknown`")
 
@@ -1197,7 +1197,7 @@ def create_interface() -> gr.Blocks:
                             scale=1,
                         )
                         quick_audio = gr.Audio(
-                            label="Or record symptoms (MedASR)",
+                            label="Or record symptoms (Whisper)",
                             sources=["microphone"],
                             type="numpy",
                             scale=1,
@@ -1325,7 +1325,7 @@ HealthPost orchestrates **five specialised clinical AI modules** into one seamle
 
 | Step | Module | Purpose |
 |------|--------|---------|
-| 1 | **MedASR** | Voice \u2192 structured symptom text |
+| 1 | **Whisper** | Voice \u2192 structured symptom text |
 | 2 | **MedGemma Vision** | Analyse medical images (skin, wounds, eyes) |
 | 3 | **MedGemma Text** | Differential diagnosis + treatment plan |
 | 4 | **DDInter API** | Drug-drug interaction safety check |

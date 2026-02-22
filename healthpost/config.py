@@ -1,7 +1,21 @@
 """Configuration for the HealthPost application."""
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
+
+
+def detect_device() -> str:
+    """Return ``'cuda'`` when running on HF Spaces or a local GPU, else ``'cpu'``."""
+    if os.environ.get("SPACE_ID"):
+        return "cuda"
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return "cuda"
+    except ImportError:
+        pass
+    return "cpu"
 
 
 @dataclass
@@ -10,8 +24,7 @@ class Config:
 
     Attributes:
         hf_model_id: Hugging Face model ID for MedGemma.
-        medasr_model_id: Hugging Face model ID for MedASR.
-        device: Torch device string (ZeroGPU assigns GPU dynamically).
+        device: Torch device string (auto-detected; ``'cuda'`` on Spaces/GPU).
         hf_use_4bit: Whether to use 4-bit quantization to fit in ZeroGPU VRAM.
         data_dir: Directory containing static data assets.
         max_new_tokens: Maximum tokens per generation call.
@@ -22,8 +35,7 @@ class Config:
     """
 
     hf_model_id: str = "google/medgemma-4b-it"
-    medasr_model_id: str = "google/medasr"
-    device: str = "cpu"
+    device: str = field(default_factory=detect_device)
     hf_use_4bit: bool = True
 
     data_dir: Path = field(
