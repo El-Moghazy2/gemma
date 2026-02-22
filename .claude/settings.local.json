@@ -35,7 +35,8 @@
       "Bash(unzip:*)",
       "WebFetch(domain:www.gradio.app)",
       "Bash(C:/Users/almog/repos/gemma/venv/Scripts/python.exe -c \"import gradio; print\\(gradio.__version__\\)\")",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(cd:*)"
     ]
   }
 }
