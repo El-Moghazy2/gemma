@@ -109,7 +109,7 @@ class TransformersBackend:
         logger.info("Loading model %s ...", model_id)
 
         load_kwargs: dict[str, Any] = {
-            "torch_dtype": torch.float16,
+            "torch_dtype": torch.bfloat16,
             "device_map": "auto",
         }
 
@@ -119,7 +119,7 @@ class TransformersBackend:
 
                 load_kwargs["quantization_config"] = BitsAndBytesConfig(
                     load_in_4bit=True,
-                    bnb_4bit_compute_dtype=torch.float16,
+                    bnb_4bit_compute_dtype=torch.bfloat16,
                 )
                 logger.info("4-bit quantization enabled")
             except ImportError:
@@ -166,6 +166,7 @@ class TransformersBackend:
                 max_new_tokens=max_tokens,
                 do_sample=temperature > 0,
                 temperature=temperature if temperature > 0 else None,
+                top_p=0.9 if temperature > 0 else None,
             )
 
         new_tokens = output_ids[0][input_len:]
