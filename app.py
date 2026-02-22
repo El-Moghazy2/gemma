@@ -814,19 +814,14 @@ CUSTOM_CSS = """
     background: #F5F7FA !important;
     font-family: 'Inter', sans-serif !important;
 }
-/* ── Full-width header ─────────────────────────────────────────────────── */
+/* ── Full-width header (break out of parent padding) ──────────────────── */
 #hp-header-wrap {
+    width: 100vw !important;
+    margin-left: calc(-50vw + 50%) !important;
+    margin-right: calc(-50vw + 50%) !important;
     max-width: none !important;
     padding: 0 !important;
-    margin: 0 !important;
     overflow: visible !important;
-}
-
-/* ── Content area: 2/3 width, centered ─────────────────────────────────── */
-#main-tabs, #hp-footer {
-    max-width: 66% !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
 }
 #hp-header {
     position: relative !important;
@@ -834,6 +829,13 @@ CUSTOM_CSS = """
     margin: 0 !important;
     width: 100% !important;
     box-sizing: border-box !important;
+}
+
+/* ── Content area: 2/3 width, centered ─────────────────────────────────── */
+#main-tabs, #hp-footer {
+    max-width: 66% !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
 }
 h1, h2, h3, h4, h5 {
     font-family: 'Inter', sans-serif !important;
