@@ -1183,6 +1183,7 @@ def create_interface() -> gr.Blocks:
         css=CUSTOM_CSS,
         head=CUSTOM_HEAD,
         fill_width=True,
+        js="() => setTimeout(() => window.dispatchEvent(new Event('resize')), 200)",
     ) as app:
 
         # Header
