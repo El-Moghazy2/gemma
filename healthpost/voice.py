@@ -86,6 +86,14 @@ class VoiceTranscriber:
         self._load_model()
         audio_array, sample_rate = self._prepare_audio(audio)
 
+        target_rate = self.config.sample_rate
+        if sample_rate != target_rate:
+            import librosa
+            audio_array = librosa.resample(
+                audio_array, orig_sr=sample_rate, target_sr=target_rate,
+            )
+            sample_rate = target_rate
+
         import torch
 
         inputs = self._processor(
