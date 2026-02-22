@@ -11,7 +11,7 @@ Supports the complete patient visit workflow:
 import os
 
 # Use persistent storage for model cache (survives Space restarts on T4)
-os.environ.setdefault("HF_HOME", "/data/hf_cache")
+os.environ["HF_HOME"] = "/data/.huggingface"
 
 import logging
 from typing import Any, List, Optional, Tuple
