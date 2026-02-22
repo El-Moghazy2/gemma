@@ -808,11 +808,15 @@ FOOTER_HTML = """
 # ── Custom CSS ──────────────────────────────────────────────────────────────
 CUSTOM_CSS = """
 /* ── Global ─────────────────────────────────────────────────────────────── */
+html, body {
+    overflow-x: hidden !important;
+}
 .gradio-container {
     max-width: 100% !important;
     margin: 0 auto !important;
     background: #F5F7FA !important;
     font-family: 'Inter', sans-serif !important;
+    overflow-x: hidden !important;
 }
 /* Force inner Gradio wrappers to full width on initial load */
 .gradio-container > .main,
@@ -1183,7 +1187,22 @@ def create_interface() -> gr.Blocks:
         css=CUSTOM_CSS,
         head=CUSTOM_HEAD,
         fill_width=True,
-        js="() => setTimeout(() => window.dispatchEvent(new Event('resize')), 200)",
+        js="""() => {
+            const fix = () => {
+                const hdr = document.getElementById('hp-header-wrap');
+                if (!hdr) return;
+                let p = hdr.parentElement;
+                while (p && !p.classList.contains('gradio-container')) {
+                    p.style.setProperty('max-width', '100%', 'important');
+                    p.style.setProperty('padding-left', '0', 'important');
+                    p.style.setProperty('padding-right', '0', 'important');
+                    p = p.parentElement;
+                }
+            };
+            fix();
+            setTimeout(fix, 500);
+            setTimeout(fix, 1500);
+        }""",
     ) as app:
 
         # Header
