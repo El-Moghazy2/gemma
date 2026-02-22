@@ -110,7 +110,6 @@ class TransformersBackend:
 
         load_kwargs: dict[str, Any] = {
             "torch_dtype": torch.bfloat16,
-            "device_map": "auto",
         }
 
         if self.config.hf_use_4bit:

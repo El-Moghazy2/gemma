@@ -46,7 +46,7 @@ class VoiceTranscriber:
             "automatic-speech-recognition",
             model=WHISPER_MODEL_ID,
             torch_dtype=dtype,
-            device_map="auto",
+            device=self.config.device,
         )
         logger.info("Whisper loaded successfully")
 

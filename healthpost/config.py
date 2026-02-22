@@ -6,9 +6,18 @@ from pathlib import Path
 
 
 def detect_device() -> str:
-    """Return ``'cuda'`` when running on HF Spaces or a local GPU, else ``'cpu'``."""
+    """Return the target device string.
+
+    On HF Spaces with ZeroGPU, CUDA must NOT be initialised in the
+    main process — ``@spaces.GPU`` handles GPU assignment at call time.
+    We therefore always return ``'cpu'`` on Spaces so that models load
+    on CPU; ZeroGPU transparently moves them to GPU when needed.
+
+    For local runs we probe ``torch.cuda.is_available()``.
+    """
     if os.environ.get("SPACE_ID"):
-        return "cuda"
+        # ZeroGPU: load on CPU, GPU is assigned dynamically
+        return "cpu"
     try:
         import torch
         if torch.cuda.is_available():
