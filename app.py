@@ -805,7 +805,7 @@ FOOTER_HTML = """
 CUSTOM_CSS = """
 /* ── Global ─────────────────────────────────────────────────────────────── */
 .gradio-container {
-    max-width: 1200px !important;
+    max-width: 100% !important;
     margin: 0 auto !important;
     background: #F5F7FA !important;
     font-family: 'Inter', sans-serif !important;
