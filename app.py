@@ -1097,8 +1097,15 @@ textarea:focus, input:focus, .gr-input:focus {
     border-color: #E8E9F3 !important;
 }
 .gr-accordion > .label-wrap {
+    background-color: #1A1F2E !important;
+    color: #FFFFFF !important;
     font-size: 1.05rem !important;
     padding: 12px 16px !important;
+    border-radius: 16px !important;
+}
+.gr-accordion > .label-wrap span,
+.gr-accordion > .label-wrap .icon {
+    color: #FFFFFF !important;
 }
 
 /* ── Attachments row: equal height when open, natural when closed ──────── */
@@ -1144,6 +1151,10 @@ textarea:focus, input:focus, .gr-input:focus {
 
 /* ── Mobile responsive ─────────────────────────────────────────────────── */
 @media (max-width: 768px) {
+    #main-tabs, #hp-footer {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
     .gradio-container {
         padding: 0 0.5rem !important;
     }
