@@ -887,8 +887,8 @@ span.svelte-1gfkn6j,
     background-color: transparent !important;
     background-image: none !important;
 }
-/* Nuclear: strip all colored backgrounds inside groups except white cards */
-.gr-group * {
+/* Nuclear: strip all colored backgrounds inside groups except white cards and accordion headers */
+.gr-group *:not(.label-wrap):not(.label-wrap *) {
     background-color: transparent !important;
 }
 .gr-group {
@@ -1103,9 +1103,12 @@ textarea:focus, input:focus, .gr-input:focus {
     padding: 12px 16px !important;
     border-radius: 16px !important;
 }
+.gr-accordion > .label-wrap,
+.gr-accordion > .label-wrap *,
 .gr-accordion > .label-wrap span,
 .gr-accordion > .label-wrap .icon {
     color: #FFFFFF !important;
+    background-color: #1A1F2E !important;
 }
 
 /* ── Attachments row: equal height when open, natural when closed ──────── */
