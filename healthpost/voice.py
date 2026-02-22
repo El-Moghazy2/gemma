@@ -48,7 +48,7 @@ class VoiceTranscriber:
         if self._model is not None:
             return
 
-        from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
+        from transformers import AutoModel, AutoProcessor
         import torch
 
         logger.info("Loading MedASR model...")
@@ -60,7 +60,7 @@ class VoiceTranscriber:
             if self.config.device == "cuda"
             else torch.float32
         )
-        self._model = AutoModelForSpeechSeq2Seq.from_pretrained(
+        self._model = AutoModel.from_pretrained(
             self.config.medasr_model_id,
             torch_dtype=dtype,
             trust_remote_code=True,
