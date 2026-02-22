@@ -1162,6 +1162,7 @@ def create_interface() -> gr.Blocks:
         theme=theme,
         css=CUSTOM_CSS,
         head=CUSTOM_HEAD,
+        fill_width=True,
     ) as app:
 
         # Header
