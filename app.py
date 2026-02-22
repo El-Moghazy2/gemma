@@ -864,7 +864,7 @@ h1, h2, h3, h4, h5 {
 label, label span,
 .gr-group label, .gr-panel label,
 .gr-block label, .gr-block label span,
-.label-wrap, .block-label,
+.block-label,
 span.svelte-1gfkn6j,
 .gr-input-label, .gr-box > label,
 [data-testid] label, [data-testid] label span,
