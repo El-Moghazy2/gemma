@@ -2,7 +2,7 @@
 
 Supports the complete patient visit workflow:
 
-1. **INTAKE** -- Voice/text symptom capture (Whisper).
+1. **INTAKE** -- Voice/text symptom capture (MedASR / Whisper fallback).
 2. **DIAGNOSE** -- Image analysis (MedGemma Vision).
 3. **PRESCRIBE** -- AI-generated treatment (MedGemma Text).
 4. **DISPENSE** -- Drug safety check (DDInter).
@@ -43,7 +43,7 @@ def _get_backend_badge(component: str) -> str:
     badges = {
         "triage": "`MedGemma Text`",
         "vision": "`MedGemma Vision`",
-        "voice": "`Whisper`",
+        "voice": "`MedASR`",
     }
     return badges.get(component, "`Unknown`")
 
@@ -99,8 +99,9 @@ def load_demo_scenario(
 
 
 @spaces.GPU(duration=300)
-def _transcribe_audio_gpu(hp: HealthPost, audio: Any) -> Tuple[str, str]:
+def _transcribe_audio_gpu(audio: Any) -> Tuple[str, str]:
     """GPU-accelerated transcription helper."""
+    hp = get_healthpost()
     text = hp.transcribe_symptoms(audio)
     source = hp.voice.source_label
     return text, f"*{source}*"
@@ -112,16 +113,16 @@ def transcribe_audio(audio: Any) -> Tuple[str, str]:
         return "", ""
 
     try:
-        hp = get_healthpost()
-        return _transcribe_audio_gpu(hp, audio)
+        return _transcribe_audio_gpu(audio)
     except Exception as e:
         logger.error("Transcription error: %s", e)
         return f"[Error transcribing audio: {e}]", ""
 
 
 @spaces.GPU(duration=300)
-def _analyze_image_gpu(hp: HealthPost, image: Any, image_type: str) -> dict:
+def _analyze_image_gpu(image: Any, image_type: str) -> dict:
     """GPU-accelerated image analysis helper."""
+    hp = get_healthpost()
     if image_type == "Skin/Rash":
         return hp.vision.analyze_skin_condition(image)
     elif image_type == "Wound":
@@ -137,10 +138,9 @@ def analyze_medical_image(image: Any, image_type: str) -> str:
         return ""
 
     try:
-        hp = get_healthpost()
         badge = _get_backend_badge("vision")
 
-        result = _analyze_image_gpu(hp, image, image_type)
+        result = _analyze_image_gpu(image, image_type)
 
         header = f"**Powered by:** {badge}\n\n---\n\n"
 
@@ -157,8 +157,9 @@ def analyze_medical_image(image: Any, image_type: str) -> str:
 
 
 @spaces.GPU(duration=300)
-def _diagnose_gpu(hp: HealthPost, symptoms_text: str, findings_list: List[str], patient_age: Optional[str]):
+def _diagnose_gpu(symptoms_text: str, findings_list: List[str], patient_age: Optional[str]):
     """GPU-accelerated diagnosis helper."""
+    hp = get_healthpost()
     return hp.triage.diagnose_and_treat(
         symptoms=symptoms_text,
         visual_findings=findings_list,
@@ -182,7 +183,6 @@ def generate_diagnosis(
         return
 
     try:
-        hp = get_healthpost()
         badge = _get_backend_badge("triage")
 
         findings_list: List[str] = []
@@ -193,7 +193,7 @@ def generate_diagnosis(
                     findings_list.append(line)
 
         diagnosis, treatment = _diagnose_gpu(
-            hp, symptoms_text, findings_list,
+            symptoms_text, findings_list,
             patient_age if patient_age else None,
         )
 
@@ -448,13 +448,13 @@ def update_interaction_ui(
 
 @spaces.GPU(duration=300)
 def _run_pipeline_gpu(
-    hp: HealthPost,
     symptoms: str,
     images: List[Any],
     meds: List[str],
     age: Optional[str],
 ):
     """GPU-accelerated patient visit pipeline."""
+    hp = get_healthpost()
     return hp.patient_visit(
         symptoms_text=symptoms,
         images=images,
@@ -509,7 +509,7 @@ def run_complete_workflow(
         yield "**Running AI analysis...**", None, hide, hide, hide
 
         result = _run_pipeline_gpu(
-            hp, final_symptoms, images, current_meds,
+            final_symptoms, images, current_meds,
             patient_age if patient_age else None,
         )
 
@@ -522,8 +522,9 @@ def run_complete_workflow(
 
 
 @spaces.GPU(duration=300)
-def _chat_respond_gpu(hp: HealthPost, message: str, conversation_messages: list, visit_result) -> str:
+def _chat_respond_gpu(message: str, conversation_messages: list, visit_result) -> str:
     """GPU-accelerated chat response helper."""
+    hp = get_healthpost()
     return hp.chat(message, conversation_messages, visit_result)
 
 
@@ -544,10 +545,8 @@ def chat_respond(
     if visit_result is None:
         return chat_history, "", conversation_messages
 
-    hp = get_healthpost()
-
     try:
-        response = _chat_respond_gpu(hp, message, conversation_messages, visit_result)
+        response = _chat_respond_gpu(message, conversation_messages, visit_result)
     except Exception as e:
         logger.error("Chat error: %s", e)
         response = f"Sorry, I encountered an error: {e}"
@@ -1198,7 +1197,7 @@ def create_interface() -> gr.Blocks:
                             scale=1,
                         )
                         quick_audio = gr.Audio(
-                            label="Or record symptoms (Whisper)",
+                            label="Or record symptoms (MedASR)",
                             sources=["microphone"],
                             type="numpy",
                             scale=1,
@@ -1326,7 +1325,7 @@ HealthPost orchestrates **five specialised clinical AI modules** into one seamle
 
 | Step | Module | Purpose |
 |------|--------|---------|
-| 1 | **Whisper** | Voice \u2192 structured symptom text |
+| 1 | **MedASR** | Voice \u2192 structured symptom text |
 | 2 | **MedGemma Vision** | Analyse medical images (skin, wounds, eyes) |
 | 3 | **MedGemma Text** | Differential diagnosis + treatment plan |
 | 4 | **DDInter API** | Drug-drug interaction safety check |

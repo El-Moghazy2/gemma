@@ -33,6 +33,7 @@ class Config:
 
     Attributes:
         hf_model_id: Hugging Face model ID for MedGemma.
+        medasr_model_id: Hugging Face model ID for MedASR speech-to-text.
         device: Torch device string (auto-detected; ``'cuda'`` on Spaces/GPU).
         hf_use_4bit: Whether to use 4-bit quantization to fit in ZeroGPU VRAM.
         data_dir: Directory containing static data assets.
@@ -44,6 +45,7 @@ class Config:
     """
 
     hf_model_id: str = "google/medgemma-4b-it"
+    medasr_model_id: str = "google/medasr"
     device: str = field(default_factory=detect_device)
     hf_use_4bit: bool = True
 

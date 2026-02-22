@@ -1,6 +1,7 @@
 """Voice transcription module for medical speech-to-text.
 
-Uses OpenAI Whisper-small for reliable speech-to-text on HF Spaces.
+Uses Google MedASR for medical-domain speech recognition, with
+OpenAI Whisper-small as a fallback.
 """
 
 import logging
@@ -13,6 +14,7 @@ from .config import Config
 
 logger = logging.getLogger(__name__)
 
+MEDASR_MODEL_ID = "google/medasr"
 WHISPER_MODEL_ID = "openai/whisper-small"
 
 
@@ -26,10 +28,13 @@ class VoiceTranscriber:
     def __init__(self, config: Config) -> None:
         self.config = config
         self._pipe = None
+        self._backend: str = "unknown"
 
     @property
     def source_label(self) -> str:
         """Human-readable label for the transcription backend."""
+        if self._backend == "medasr":
+            return f"Transcribed via MedASR ({MEDASR_MODEL_ID})"
         return f"Transcribed via Whisper ({WHISPER_MODEL_ID})"
 
     def _load_model(self) -> None:
@@ -41,6 +46,22 @@ class VoiceTranscriber:
 
         dtype = torch.float16 if self.config.device == "cuda" else torch.float32
 
+        # Try MedASR first
+        try:
+            logger.info("Loading MedASR (%s)...", self.config.medasr_model_id)
+            self._pipe = pipeline(
+                "automatic-speech-recognition",
+                model=self.config.medasr_model_id,
+                torch_dtype=dtype,
+                device=self.config.device,
+            )
+            self._backend = "medasr"
+            logger.info("MedASR loaded successfully")
+            return
+        except Exception as exc:
+            logger.warning("MedASR failed to load (%s), falling back to Whisper", exc)
+
+        # Fallback to Whisper
         logger.info("Loading Whisper (%s)...", WHISPER_MODEL_ID)
         self._pipe = pipeline(
             "automatic-speech-recognition",
@@ -48,6 +69,7 @@ class VoiceTranscriber:
             torch_dtype=dtype,
             device=self.config.device,
         )
+        self._backend = "whisper"
         logger.info("Whisper loaded successfully")
 
     def transcribe(
@@ -67,8 +89,15 @@ class VoiceTranscriber:
             )
             sample_rate = target_rate
 
+        # MedASR needs chunking params for long audio
+        call_kwargs: dict[str, Any] = {}
+        if self._backend == "medasr":
+            call_kwargs["chunk_length_s"] = 20
+            call_kwargs["stride_length_s"] = 2
+
         result = self._pipe(
             {"array": audio_array, "sampling_rate": sample_rate},
+            **call_kwargs,
         )
         return result["text"].strip()
 
