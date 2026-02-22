@@ -818,9 +818,11 @@ html, body {
     font-family: 'Inter', sans-serif !important;
     overflow-x: hidden !important;
 }
-/* Force inner Gradio layout to full width (override media query breakpoints) */
-.gradio-container .app,
-.gradio-container .fillable {
+/* Force ALL inner Gradio wrappers to full width */
+.gradio-container > div,
+.gradio-container > div > div,
+.gradio-container > div > div > div {
+    width: 100% !important;
     max-width: 100% !important;
     padding-left: 0 !important;
     padding-right: 0 !important;
@@ -1188,15 +1190,27 @@ def create_interface() -> gr.Blocks:
         head=CUSTOM_HEAD,
         fill_width=True,
         js="""() => {
-            const fix = (el) => {
-                el.style.setProperty('max-width', '100%', 'important');
-                el.style.setProperty('padding', '0', 'important');
+            const fix = () => {
+                const hdr = document.getElementById('hp-header-wrap');
+                if (!hdr) return false;
+                let p = hdr.parentElement;
+                while (p) {
+                    p.style.setProperty('width', '100%', 'important');
+                    p.style.setProperty('max-width', '100%', 'important');
+                    p.style.setProperty('padding-left', '0', 'important');
+                    p.style.setProperty('padding-right', '0', 'important');
+                    if (p.classList.contains('gradio-container')) break;
+                    p = p.parentElement;
+                }
+                return true;
             };
-            document.querySelectorAll('.gradio-container .app, .gradio-container .fillable').forEach(fix);
-            new MutationObserver((_, obs) => {
-                const app = document.querySelector('.gradio-container .app');
-                if (app) { fix(app); obs.disconnect(); }
-            }).observe(document.body, {childList: true, subtree: true});
+            if (!fix()) {
+                new MutationObserver((_, obs) => {
+                    if (fix()) obs.disconnect();
+                }).observe(document.body, {childList: true, subtree: true});
+            }
+            setTimeout(fix, 500);
+            setTimeout(fix, 2000);
         }""",
     ) as app:
 
