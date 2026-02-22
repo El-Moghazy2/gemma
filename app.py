@@ -803,26 +803,26 @@ FOOTER_HTML = """
 
 # ── Custom CSS ──────────────────────────────────────────────────────────────
 CUSTOM_CSS = """
-/* ── Prevent HF Space iframe / wrapper scrollbars from full-width header ─ */
-html, body {
-    overflow-x: hidden !important;
-}
-
 /* ── Global ─────────────────────────────────────────────────────────────── */
 .gradio-container {
     max-width: 1200px !important;
     margin: 0 auto !important;
     background: #F5F7FA !important;
     font-family: 'Inter', sans-serif !important;
-    overflow-x: hidden !important;
 }
 
 /* ── Full-width header ─────────────────────────────────────────────────── */
+#hp-header-wrap {
+    max-width: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+}
 #hp-header {
     position: relative !important;
     border-radius: 0 !important;
-    width: 100vw !important;
-    margin-left: calc(-50vw + 50%) !important;
+    margin: 0 !important;
+    width: 100% !important;
     box-sizing: border-box !important;
 }
 h1, h2, h3, h4, h5 {
@@ -1165,7 +1165,7 @@ def create_interface() -> gr.Blocks:
     ) as app:
 
         # Header
-        gr.HTML(HEADER_HTML)
+        gr.HTML(HEADER_HTML, elem_id="hp-header-wrap")
 
         with gr.Tabs():
 
