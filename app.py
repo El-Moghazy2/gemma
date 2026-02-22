@@ -803,6 +803,11 @@ FOOTER_HTML = """
 
 # ── Custom CSS ──────────────────────────────────────────────────────────────
 CUSTOM_CSS = """
+/* ── Prevent HF Space iframe / wrapper scrollbars from full-width header ─ */
+html, body {
+    overflow-x: hidden !important;
+}
+
 /* ── Global ─────────────────────────────────────────────────────────────── */
 .gradio-container {
     max-width: 1200px !important;
@@ -816,10 +821,9 @@ CUSTOM_CSS = """
 #hp-header {
     position: relative !important;
     border-radius: 0 !important;
-    margin-left: -1000px !important;
-    margin-right: -1000px !important;
-    padding-left: 1000px !important;
-    padding-right: 1000px !important;
+    width: 100vw !important;
+    margin-left: calc(-50vw + 50%) !important;
+    box-sizing: border-box !important;
 }
 h1, h2, h3, h4, h5 {
     font-family: 'Inter', sans-serif !important;
