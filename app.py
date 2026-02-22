@@ -1258,6 +1258,7 @@ def create_interface() -> gr.Blocks:
                     visible=False,
                     height=300,
                     layout="bubble",
+                    type="messages",
                     elem_id="follow-up-chatbot",
                 )
                 with gr.Row(visible=False) as chat_input_row:
