@@ -1,7 +1,7 @@
-"""Voice transcription module using MedASR for medical speech-to-text.
+"""Voice transcription module for medical speech-to-text.
 
-Handles symptom capture from patient or CHW voice descriptions.
-Requires MedASR — fails if the model cannot be loaded.
+Tries MedASR first; falls back to Whisper if MedASR is unavailable or
+incompatible with the installed transformers version.
 """
 
 import logging
@@ -18,71 +18,60 @@ logger = logging.getLogger(__name__)
 class VoiceTranscriber:
     """Medical speech-to-text transcriber.
 
-    Optimized for medical terminology and symptom descriptions.
-
     Attributes:
         config: Application configuration.
     """
 
     def __init__(self, config: Config) -> None:
-        """Initialize the voice transcriber.
-
-        Args:
-            config: Application configuration instance.
-        """
         self.config = config
-        self._model = None
-        self._processor = None
+        self._pipe = None
+        self._backend_name: str = ""
 
     @property
     def source_label(self) -> str:
         """Human-readable label for the transcription backend."""
-        return "Transcribed via MedASR (google/medasr)"
+        return f"Transcribed via {self._backend_name}"
 
     def _load_model(self) -> None:
-        """Lazy-load the MedASR model.
-
-        Raises:
-            RuntimeError: If MedASR cannot be loaded.
-        """
-        if self._model is not None:
+        if self._pipe is not None:
             return
 
-        from transformers import AutoModel, AutoProcessor
         import torch
+        from transformers import pipeline
 
-        logger.info("Loading MedASR model...")
-        self._processor = AutoProcessor.from_pretrained(
-            self.config.medasr_model_id, trust_remote_code=True,
-        )
-        dtype = (
-            torch.float16
-            if self.config.device == "cuda"
-            else torch.float32
-        )
-        self._model = AutoModel.from_pretrained(
-            self.config.medasr_model_id,
-            torch_dtype=dtype,
-            trust_remote_code=True,
-        )
-        self._model.to(self.config.device)
-        logger.info("MedASR model loaded successfully")
+        device = self.config.device
+        dtype = torch.float16 if device == "cuda" else torch.float32
+
+        # Try MedASR first, fall back to Whisper
+        try:
+            logger.info("Trying MedASR (%s)...", self.config.medasr_model_id)
+            self._pipe = pipeline(
+                "automatic-speech-recognition",
+                model=self.config.medasr_model_id,
+                torch_dtype=dtype,
+                device=device,
+                trust_remote_code=True,
+            )
+            self._backend_name = f"MedASR ({self.config.medasr_model_id})"
+            logger.info("MedASR loaded successfully")
+        except Exception as exc:
+            logger.warning("MedASR failed (%s), falling back to Whisper", exc)
+            whisper_id = "openai/whisper-small"
+            self._pipe = pipeline(
+                "automatic-speech-recognition",
+                model=whisper_id,
+                torch_dtype=dtype,
+                device=device,
+            )
+            self._backend_name = f"Whisper ({whisper_id})"
+            logger.info("Whisper loaded successfully")
 
     def transcribe(
         self,
         audio: Union[np.ndarray, str, Path, Any],
         language: str = "en",
     ) -> str:
-        """Transcribe audio to text.
-
-        Args:
-            audio: Audio input as a numpy array, file path, or Gradio
-                audio tuple ``(sample_rate, data)``.
-            language: Language code for transcription.
-
-        Returns:
-            Transcribed text string.
-        """
+        """Transcribe audio to text."""
         self._load_model()
         audio_array, sample_rate = self._prepare_audio(audio)
 
@@ -94,41 +83,15 @@ class VoiceTranscriber:
             )
             sample_rate = target_rate
 
-        import torch
-
-        inputs = self._processor(
-            audio_array,
-            sampling_rate=sample_rate,
-            return_tensors="pt",
+        result = self._pipe(
+            {"array": audio_array, "sampling_rate": sample_rate},
         )
-        inputs = {
-            k: v.to(self.config.device) for k, v in inputs.items()
-        }
-
-        with torch.no_grad():
-            generated_ids = self._model.generate(
-                **inputs, max_new_tokens=256,
-            )
-
-        transcription = self._processor.batch_decode(
-            generated_ids, skip_special_tokens=True
-        )[0]
-        return transcription.strip()
+        return result["text"].strip()
 
     def _prepare_audio(
         self, audio: Union[np.ndarray, str, Path, Any],
     ) -> tuple[np.ndarray, int]:
-        """Normalize audio input to ``(array, sample_rate)``.
-
-        Args:
-            audio: Raw audio in any supported format.
-
-        Returns:
-            Tuple of ``(float32 mono array, sample_rate)``.
-
-        Raises:
-            ValueError: If the audio type is not supported.
-        """
+        """Normalize audio input to ``(array, sample_rate)``."""
         if isinstance(audio, tuple) and len(audio) == 2:
             sample_rate, audio_array = audio
             if isinstance(audio_array, np.ndarray):
@@ -155,18 +118,7 @@ class VoiceTranscriber:
     def _load_audio_file(
         self, path: Union[str, Path],
     ) -> tuple[np.ndarray, int]:
-        """Load audio samples from a file on disk.
-
-        Args:
-            path: Path to the audio file.
-
-        Returns:
-            Tuple of ``(float32 mono array, sample_rate)``.
-
-        Raises:
-            FileNotFoundError: If *path* does not exist.
-            ImportError: If no audio loading library is available.
-        """
+        """Load audio samples from a file on disk."""
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"Audio file not found: {path}")
