@@ -814,6 +814,11 @@ CUSTOM_CSS = """
     background: #F5F7FA !important;
     font-family: 'Inter', sans-serif !important;
 }
+.gradio-container > .main > .wrap,
+.gradio-container > .main,
+.gradio-container .contain {
+    max-width: 100% !important;
+}
 
 /* ── Full-width header ─────────────────────────────────────────────────── */
 #hp-header-wrap {
