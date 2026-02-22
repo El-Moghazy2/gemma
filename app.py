@@ -818,10 +818,9 @@ html, body {
     font-family: 'Inter', sans-serif !important;
     overflow-x: hidden !important;
 }
-/* Force inner Gradio wrappers to full width on initial load */
-.gradio-container > .main,
-.gradio-container > .main > .wrap,
-.gradio-container .contain {
+/* Force inner Gradio layout to full width (override media query breakpoints) */
+.gradio-container .app,
+.gradio-container .fillable {
     max-width: 100% !important;
     padding-left: 0 !important;
     padding-right: 0 !important;
@@ -1188,20 +1187,15 @@ def create_interface() -> gr.Blocks:
         head=CUSTOM_HEAD,
         fill_width=True,
         js="""() => {
-            const fix = () => {
-                const hdr = document.getElementById('hp-header-wrap');
-                if (!hdr) return;
-                let p = hdr.parentElement;
-                while (p && !p.classList.contains('gradio-container')) {
-                    p.style.setProperty('max-width', '100%', 'important');
-                    p.style.setProperty('padding-left', '0', 'important');
-                    p.style.setProperty('padding-right', '0', 'important');
-                    p = p.parentElement;
-                }
+            const fix = (el) => {
+                el.style.setProperty('max-width', '100%', 'important');
+                el.style.setProperty('padding', '0', 'important');
             };
-            fix();
-            setTimeout(fix, 500);
-            setTimeout(fix, 1500);
+            document.querySelectorAll('.gradio-container .app, .gradio-container .fillable').forEach(fix);
+            new MutationObserver((_, obs) => {
+                const app = document.querySelector('.gradio-container .app');
+                if (app) { fix(app); obs.disconnect(); }
+            }).observe(document.body, {childList: true, subtree: true});
         }""",
     ) as app:
 
