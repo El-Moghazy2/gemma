@@ -98,7 +98,7 @@ def load_demo_scenario(
     return s["symptoms"], s["age"], s["meds"]
 
 
-@spaces.GPU(duration=180)
+@spaces.GPU(duration=300)
 def _transcribe_audio_gpu(hp: HealthPost, audio: Any) -> Tuple[str, str]:
     """GPU-accelerated transcription helper."""
     text = hp.transcribe_symptoms(audio)
@@ -119,7 +119,7 @@ def transcribe_audio(audio: Any) -> Tuple[str, str]:
         return f"[Error transcribing audio: {e}]", ""
 
 
-@spaces.GPU(duration=180)
+@spaces.GPU(duration=300)
 def _analyze_image_gpu(hp: HealthPost, image: Any, image_type: str) -> dict:
     """GPU-accelerated image analysis helper."""
     if image_type == "Skin/Rash":
@@ -156,7 +156,7 @@ def analyze_medical_image(image: Any, image_type: str) -> str:
         return f"[Error analyzing image: {e}]"
 
 
-@spaces.GPU(duration=180)
+@spaces.GPU(duration=300)
 def _diagnose_gpu(hp: HealthPost, symptoms_text: str, findings_list: List[str], patient_age: Optional[str]):
     """GPU-accelerated diagnosis helper."""
     return hp.triage.diagnose_and_treat(
@@ -446,7 +446,7 @@ def update_interaction_ui(
     )
 
 
-@spaces.GPU(duration=180)
+@spaces.GPU(duration=300)
 def _run_pipeline_gpu(
     hp: HealthPost,
     symptoms: str,
@@ -521,7 +521,7 @@ def run_complete_workflow(
         yield f"**Error:** {e}", None, hide, hide, hide
 
 
-@spaces.GPU(duration=180)
+@spaces.GPU(duration=300)
 def _chat_respond_gpu(hp: HealthPost, message: str, conversation_messages: list, visit_result) -> str:
     """GPU-accelerated chat response helper."""
     return hp.chat(message, conversation_messages, visit_result)
