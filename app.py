@@ -814,6 +814,14 @@ CUSTOM_CSS = """
     background: #F5F7FA !important;
     font-family: 'Inter', sans-serif !important;
 }
+/* Force inner Gradio wrappers to full width on initial load */
+.gradio-container > .main,
+.gradio-container > .main > .wrap,
+.gradio-container .contain {
+    max-width: 100% !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+}
 /* ── Full-width header (break out of parent padding) ──────────────────── */
 #hp-header-wrap {
     width: 100vw !important;
