@@ -844,8 +844,8 @@ html, body {
 
 /* ── Content area: 2/3 width, centered ─────────────────────────────────── */
 #main-tabs, #hp-footer {
-    width: 66% !important;
-    max-width: 66% !important;
+    width: 80% !important;
+    max-width: 80% !important;
     margin-left: auto !important;
     margin-right: auto !important;
 }
