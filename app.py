@@ -254,14 +254,20 @@ def generate_diagnosis(
         yield f"[Error: {e}]", "", "", ""
 
 
+@spaces.GPU(duration=300)
+def _extract_medications_gpu(image: Any) -> List[str]:
+    """GPU-accelerated medication extraction helper."""
+    hp = get_healthpost()
+    return hp.vision.extract_medications(image)
+
+
 def extract_medications_from_photo(image: Any) -> str:
     """Extract medication names from a photo of labels."""
     if image is None:
         return ""
 
     try:
-        hp = get_healthpost()
-        medications = hp.vision.extract_medications(image)
+        medications = _extract_medications_gpu(image)
         return "\n".join(medications)
     except Exception as e:
         logger.error("Medication extraction error: %s", e)
@@ -481,11 +487,9 @@ def run_complete_workflow(
     yield "**Starting workflow...**", None, hide, hide, hide
 
     try:
-        hp = get_healthpost()
-
         final_symptoms = symptoms_text.strip()
         if audio is not None:
-            transcribed = hp.transcribe_symptoms(audio)
+            transcribed, _ = _transcribe_audio_gpu(audio)
             if final_symptoms:
                 final_symptoms = f"{transcribed}\n{final_symptoms}"
             else:
@@ -499,7 +503,7 @@ def run_complete_workflow(
 
         current_meds: List[str] = []
         if current_meds_photo is not None:
-            current_meds.extend(hp.extract_medications(current_meds_photo))
+            current_meds.extend(_extract_medications_gpu(current_meds_photo))
         if current_meds_text.strip():
             for line in current_meds_text.split("\n"):
                 line = line.strip().lstrip("\u2022-* ")
@@ -513,6 +517,7 @@ def run_complete_workflow(
             patient_age if patient_age else None,
         )
 
+        hp = get_healthpost()
         main_output = _format_result_markdown(result, hp)
         show = gr.update(visible=True)
         yield main_output, result, show, show, show
