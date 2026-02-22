@@ -2,7 +2,7 @@
 # Requires MedGemma via HF Transformers
 
 # Inference
-transformers @ git+https://github.com/huggingface/transformers.git@65dc261512cbdb1ee72b88ae5b222f2605aad8e5
+transformers @ https://github.com/huggingface/transformers/archive/65dc261512cbdb1ee72b88ae5b222f2605aad8e5.zip
 torch>=2.1.0
 accelerate>=0.25.0
 bitsandbytes>=0.41.0
