@@ -814,18 +814,19 @@ CUSTOM_CSS = """
     background: #F5F7FA !important;
     font-family: 'Inter', sans-serif !important;
 }
-.gradio-container > .main > .wrap,
-.gradio-container > .main,
-.gradio-container .contain {
-    max-width: 100% !important;
-}
-
 /* ── Full-width header ─────────────────────────────────────────────────── */
 #hp-header-wrap {
     max-width: none !important;
     padding: 0 !important;
     margin: 0 !important;
     overflow: visible !important;
+}
+
+/* ── Content area: 2/3 width, centered ─────────────────────────────────── */
+#main-tabs, #hp-footer {
+    max-width: 66% !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
 }
 #hp-header {
     position: relative !important;
@@ -1177,7 +1178,7 @@ def create_interface() -> gr.Blocks:
         # Header
         gr.HTML(HEADER_HTML, elem_id="hp-header-wrap")
 
-        with gr.Tabs():
+        with gr.Tabs(elem_id="main-tabs"):
 
             with gr.Tab("🩺 Clinical Workspace"):
 
@@ -1365,7 +1366,7 @@ HealthPost orchestrates **five specialised clinical AI modules** into one seamle
                 )
 
         # Footer
-        gr.HTML(FOOTER_HTML)
+        gr.HTML(FOOTER_HTML, elem_id="hp-footer")
 
     return app
 
