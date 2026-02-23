@@ -1,244 +1,177 @@
-# HealthPost: Complete CHW Decision Support
+# HealthPost
 
-## MedGemma Impact Challenge - Technical Writeup
+A complete clinical decision support system for Community Health Workers, built on MedGemma and MedASR.
 
----
+### Your team
 
-## 1. Problem Statement
-
-### The Challenge
-
-Community Health Workers (CHWs) serve as the primary healthcare providers for approximately **3 billion people** in low-resource settings worldwide. Unlike physicians in well-equipped facilities, CHWs face a unique challenge: they must act as **both doctor AND pharmacist** during patient visits.
-
-Current digital health tools fail CHWs because they address only part of the workflow:
-- Symptom checkers provide diagnosis but not treatment
-- Drug reference apps check interactions but don't diagnose
-- No tool supports the complete visit from intake to dispensing
-
-### The Consequences
-
-This gap leads to:
-- **Misdiagnosis** due to limited training and no decision support
-- **Medication errors** - the 3rd leading cause of death globally
-- **Delayed referrals** when serious conditions go unrecognized
-- **Drug interactions** when current medications aren't considered
-
-### Our Solution
-
-**HealthPost** is a complete decision support tool that guides CHWs through the entire patient visit:
-
-```
-INTAKE → DIAGNOSE → PRESCRIBE → DISPENSE
-```
-
-By integrating MedGemma 1.5's medical AI capabilities with an offline drug database, HealthPost provides:
-1. Voice-based symptom capture using MedASR
-2. Visual analysis of skin conditions and wounds
-3. AI-powered diagnosis with agentic reasoning
-4. Treatment recommendations appropriate for health post level
-5. Drug interaction checking before dispensing
+Solo project.
 
 ---
 
-## 2. Technical Implementation
+### Problem statement
 
-### Architecture Overview
+Community Health Workers (CHWs) serve as the primary — and often only — healthcare providers for approximately **3 billion people** in low- and middle-income countries [WHO, 2018]. During a typical visit, a CHW must act as **both clinician and pharmacist**: assessing symptoms, making a diagnosis, choosing a treatment, and dispensing medication — all without laboratory support or specialist backup.
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    HEALTHPOST                            │
-├─────────────────────────────────────────────────────────┤
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │
-│  │   INTAKE    │  │  DIAGNOSE   │  │  PRESCRIBE  │     │
-│  │             │  │             │  │             │     │
-│  │  MedASR     │─▶│  MedGemma   │─▶│  MedGemma   │     │
-│  │  (voice)    │  │  1.5 Vision │  │  1.5 Text   │     │
-│  │             │  │             │  │             │     │
-│  └─────────────┘  └─────────────┘  └─────────────┘     │
-│                                            │            │
-│                          ┌─────────┐       │            │
-│                          │  ReAct  │◀──────┘            │
-│                          │  Agent  │                    │
-│                          └────┬────┘                    │
-│                               ▼                         │
-│                       ┌─────────────┐                   │
-│                       │  DISPENSE   │                   │
-│                       │             │                   │
-│                       │  Drug DB    │                   │
-│                       │  + DDInter  │                   │
-│                       │             │                   │
-│                       └─────────────┘                   │
-└─────────────────────────────────────────────────────────┘
-```
+This dual role creates compounding failure modes:
 
-### Models Used
+- **Diagnostic errors** from limited training and no decision support tools.
+- **Medication errors** — the third leading cause of death globally, responsible for an estimated 2.6 million deaths per year [WHO, 2017].
+- **Missed drug interactions** when a patient's existing medications are unknown or not considered.
+- **Delayed referrals** when serious conditions go unrecognized at the health-post level.
 
-| Model | Capability | Application |
-|-------|------------|-------------|
-| **MedGemma 1.5 4B** | Medical Vision | Analyze skin conditions, wounds, rashes |
-| **MedGemma 1.5 4B** | Medical Reasoning | Generate diagnosis and treatment plans |
-| **MedGemma 1.5 4B** | Agentic Reasoning | Autonomous ReAct clinical decision loop |
-| **MedASR** | Speech-to-Text | Transcribe patient symptom descriptions |
+Existing digital health tools address these problems in isolation: symptom checkers diagnose but do not prescribe; drug reference apps check interactions but do not diagnose. No tool supports the **complete visit workflow** from intake to dispensing.
 
-### Why MedGemma 1.5
-
-We use `google/medgemma-1.5-4b-it` — the latest MedGemma release — which offers significant improvements over v1:
-
-- **+5% on MedQA** (medical question answering benchmark)
-- **+22% on EHRQA** (electronic health record question answering)
-- **Improved medical imaging** accuracy
-- **Same hardware footprint** (~4 GB VRAM with 4-bit quantization)
-
-HealthPost requires MedGemma 1.5 and does not include fallback backends. If the model cannot be loaded, the application fails at startup with a clear error message. This ensures CHWs always receive the highest-quality AI assistance.
-
-### Key Components
-
-**1. Voice Symptom Capture (MedASR)**
-
-MedASR transcribes spoken symptom descriptions with medical vocabulary awareness:
-- Optimized for medical terminology
-- Works with accented speech common in community health settings
-- Feeds directly into the diagnosis pipeline
-
-**2. Medical Image Analysis (MedGemma 1.5 Vision)**
-
-MedGemma 1.5 Vision analyzes uploaded photos with condition-specific prompts:
-- Skin conditions: Identifies rashes, lesions, infections
-- Wounds: Assesses type, infection signs, healing stage
-- Medication labels: Extracts drug names from photos of bottles/packages
-- Provides severity assessment and recommended actions
-
-Uses `AutoModelForImageTextToText` with `bfloat16` precision for optimal accuracy.
-
-**3. Diagnosis Engine (MedGemma 1.5 Text)**
-
-MedGemma 1.5 Text processes symptoms and visual findings to generate:
-- Primary diagnosis with confidence level
-- Differential diagnoses to consider
-- Treatment recommendations appropriate for CHW level
-- Referral guidance when hospital care is needed
-
-Uses `AutoModelForImageTextToText` with `AutoProcessor` and `bfloat16` precision.
-
-**4. Agentic Reasoning (ReAct Agent)**
-
-HealthPost uses a **ReAct (Reason + Act)** agent loop for autonomous clinical reasoning:
-
-1. MedGemma 1.5 receives the patient case
-2. It **reasons** about what information is needed (`[THOUGHT]`)
-3. It **acts** by calling tools like `analyze_skin`, `check_interactions` (`[ACTION]`)
-4. It reviews observations and decides next steps (`[OBSERVATION]`)
-5. After gathering enough information, it provides a complete assessment (`[FINAL_ANSWER]`)
-
-This transparent reasoning builds CHW trust — they can see *why* the AI made each decision.
-
-**5. Drug Safety Module**
-
-Offline SQLite database containing:
-- WHO Essential Medicines List (~300 drugs)
-- Known drug-drug interactions with severity ratings
-- Contraindications and dosing guidance
-
-Supplemented by the **DDInter API** for additional interaction data when online.
-
-Before dispensing, the system checks for interactions between:
-- Patient's current medications
-- Newly recommended medications
-
-When severe interactions are detected, the system suggests alternative medications.
-
-**6. Edge Deployment**
-
-Designed for offline operation:
-- 4-bit quantization reduces VRAM to ~4 GB (runs on consumer GPUs / Kaggle T4)
-- SQLite database requires no internet connection
-- Gradio UI works on mobile browsers
-
-### Authentication
-
-MedGemma 1.5 is a **gated model** on HuggingFace. To use it:
-
-1. Request access at https://huggingface.co/google/medgemma-1.5-4b-it
-2. Generate a token at https://huggingface.co/settings/tokens
-3. Authenticate: `huggingface-cli login`
-
-### Technical Specifications
+**HealthPost** closes this gap. It is an end-to-end clinical decision support system that guides CHWs through every stage of a patient encounter:
 
 ```
-Model:      MedGemma 1.5 4B (google/medgemma-1.5-4b-it)
-Precision:  bfloat16 (or 4-bit NF4 quantized on CUDA)
-Memory:     ~4 GB VRAM with 4-bit quantization
-Inference:  <10 seconds per diagnosis on T4 GPU
-Database:   ~5 MB SQLite (300 drugs, 50+ interactions)
-Interface:  Gradio web UI (mobile-compatible)
-Backend:    HuggingFace Transformers (no fallbacks)
-Auth:       HuggingFace token required (gated model)
+INTAKE  ─►  DIAGNOSE  ─►  PRESCRIBE  ─►  DISPENSE
+(voice)     (vision+LLM)   (LLM)         (DDInter API)
 ```
+
+**Impact potential**: 500 million CHW patient visits occur annually. Even a 1% improvement in diagnostic accuracy translates to 5 million better outcomes per year. 4-bit quantization makes the model deployable on a ~$200 edge device with a T4-class GPU, and the same codebase runs on HuggingFace Spaces for cloud access or locally for offline model inference.
 
 ---
 
-## 3. Evaluation & Impact
+### Overall solution
 
-### Test Scenarios
+HealthPost integrates **two** Health AI Developer Foundations models, each mapped to a distinct clinical function:
 
-We validated HealthPost against common CHW scenarios:
+#### MedGemma (`google/medgemma-4b-it`)
 
-| Scenario | Symptoms | Expected | HealthPost Result |
-|----------|----------|----------|-------------------|
-| Malaria | Fever 3 days, headache, chills | Antimalarial + supportive | Correct |
+| Capability | Clinical Function |
+|---|---|
+| **Vision** | Analyze skin conditions, wounds, rashes; extract medication names from labels/prescriptions |
+| **Medical reasoning** | Generate differential diagnoses with confidence scores and treatment plans appropriate for CHW level |
+
+MedGemma serves as the reasoning backbone of the entire pipeline. Every diagnosis, treatment recommendation, and referral decision flows through it. We load the model with 4-bit NF4 quantization (BitsAndBytes) and `bfloat16` compute precision via HuggingFace Transformers, keeping the memory footprint at ~4 GB VRAM [1].
+
+#### MedASR (`google/medasr`)
+
+MedASR is a 105M-parameter Conformer-based automatic speech recognition model trained on medical-domain audio [2, 3]. It enables **voice-first** symptom capture — critical for CHWs who may have limited literacy or need their hands free while examining a patient.
+
+Key technical details:
+- **Architecture**: Conformer encoder with CTC/attention hybrid decoding.
+- **Chunked inference**: `chunk_length_s=20`, `stride_length_s=2` for long-form audio.
+- **Medical vocabulary**: Trained on clinical speech, reducing word error rate by 58–82% over general-purpose models on medical terminology [3, 5].
+- **Fallback**: Whisper-small (`openai/whisper-small`) if MedASR is unavailable.
+
+#### Why these models matter together
+
+The combination is greater than the sum of its parts. MedASR feeds accurate medical transcriptions into MedGemma, which then reasons over both text and images to produce a clinically grounded assessment. A general-purpose speech model would introduce transcription errors in drug names and medical terms — exactly the kind of errors that cascade into misdiagnosis.
+
+---
+
+### Technical details
+
+#### LangGraph Pipeline
+
+HealthPost orchestrates the patient visit as a **LangGraph `StateGraph`** [6] with conditional routing:
+
+```
+              ┌──────────────┐
+              │    INTAKE    │  MedASR / text input
+              └──────┬───────┘
+                     │
+              ┌──────▼───────┐
+         ┌────│  has images? │────┐
+         │yes └──────────────┘ no │
+         ▼                        ▼
+  ┌──────────────┐        ┌──────────────┐
+  │ANALYZE IMAGES│───────▶│ EXTRACT MEDS │  Vision: label OCR
+  │  (MedGemma)  │        └──────┬───────┘
+  └──────────────┘               │
+                          ┌──────▼───────┐
+                          │   DIAGNOSE   │  MedGemma reasoning
+                          └──────┬───────┘
+                                 │
+                          ┌──────▼───────┐
+                          │ CHECK DRUGS  │  DDInter API
+                          └──────┬───────┘
+                                 │
+                    ┌────────────▼────────────┐
+               ┌────│  interactions found?    │────┐
+               │yes └────────────────────────┘ no  │
+               ▼                                    ▼
+       ┌───────────────┐                   ┌───────────────┐
+       │  ALTERNATIVES │──────────────────▶│ ASSESS SAFETY │
+       └───────────────┘                   └───────────────┘
+```
+
+Each node is a pure function over a typed `VisitState` dictionary. Conditional edges skip unnecessary steps (e.g., image analysis when no photos are provided), reducing latency.
+
+#### HuggingFace Spaces Deployment (T4 GPU)
+
+The prototype is deployed on a HuggingFace Space with a dedicated **T4 GPU** (16 GB VRAM). With 4-bit NF4 quantization, MedGemma fits comfortably within the T4's memory budget (~4 GB), leaving headroom for batch inference and concurrent requests. The `@spaces.GPU`-decorated functions ensure GPU allocation is scoped to inference calls.
+
+A live prototype is available at: https://huggingface.co/spaces/ElMoghazy/healthpost
+
+#### Structured Clinical Reasoning
+
+The diagnosis module uses MedGemma with **structured JSON output** — the Pydantic schema for `ClinicalAssessment` is included in the prompt, and the model's response is validated against it. Each assessment contains: primary diagnosis with confidence level, differential diagnoses, treatment medications with dosages and durations, patient care instructions, warning signs, and referral decisions. This structured approach ensures every assessment is complete and machine-parseable, enabling downstream safety checks (drug interactions, referral logic) to operate on reliable data.
+
+#### Drug Interaction Checking
+
+Drug interactions are checked via the **DDInter API** [4], an online database of 302,516 drug-drug interaction associations between 2,290 drugs compiled from DrugBank, KEGG, and other authoritative sources. When the API is unreachable, the system warns the user that interaction checking is unavailable rather than silently skipping it.
+
+#### Edge Deployment
+
+HealthPost is designed for low-resource deployment:
+- 4-bit NF4 quantization reduces MedGemma to ~4 GB VRAM.
+- Runs on a T4 GPU (HuggingFace Spaces) or any CUDA-capable consumer GPU locally.
+- Gradio UI renders on mobile browsers — no app installation required.
+- Model inference runs entirely locally after initial download.
+
+#### Clinical Scenario Validation
+
+| Scenario | Input | Expected outcome | Result |
+|---|---|---|---|
+| Malaria | Fever 3 days, headache, chills | Antimalarial + supportive care | Correct |
 | Gastroenteritis | Diarrhea, mild fever | ORS + Zinc | Correct |
-| Skin Fungus | Circular rash, scaling | Topical antifungal | Correct |
-| Drug Interaction | Warfarin + Metformin | Interaction warning | Detected |
-| Wound Assessment | Deep cut, redness | Cleaning + antibiotics + referral | Correct |
+| Skin fungal infection | Circular rash, scaling (photo) | Topical antifungal | Correct |
+| Drug interaction | Warfarin + Metformin | Interaction warning | Detected |
+| Wound assessment | Deep cut, redness (photo) | Cleaning + antibiotics + referral | Correct |
 
-### Safety Features
+#### Safety Features
 
-1. **Confidence Scoring**: Low-confidence diagnoses trigger referral recommendation
-2. **Interaction Alerts**: Severe interactions block dispensing with clear warnings
-3. **Alternative Suggestions**: When interactions are found, the system suggests safer alternatives
-4. **Referral Logic**: Emergency conditions automatically flagged for hospital transfer
-5. **Differential Diagnosis**: Alternative conditions listed to prevent anchoring bias
-6. **Transparent Reasoning**: Agentic workflow shows step-by-step reasoning trace
+1. **Confidence scoring** — Low-confidence diagnoses automatically trigger referral recommendations.
+2. **Drug interaction alerts** — Severe interactions are flagged with clear warnings and alternative suggestions via DDInter.
+3. **Differential diagnosis** — Multiple candidate conditions are listed to prevent anchoring bias.
+4. **Structured output** — Every assessment is a validated JSON object (Pydantic schema), ensuring completeness and enabling automated safety checks.
+5. **Referral logic** — Emergency red flags (e.g., signs of sepsis, respiratory distress) are flagged for immediate hospital transfer.
 
-### Potential Impact
+#### Performance
 
-**Quantitative:**
-- CHWs conduct ~500 million patient visits annually
-- Even 1% improvement in diagnosis accuracy = 5 million better outcomes
-- Drug interaction checking could prevent thousands of adverse events
+- Full workflow completes in **< 30 seconds** on a T4 GPU.
+- Model inference works offline after initial download.
+- Covers the most common CHW encounter types: malaria, respiratory infections, skin conditions, gastrointestinal illness, wounds.
 
-**Qualitative:**
-- Standardizes care quality across CHWs with varying training levels
-- Builds CHW confidence through transparent AI reasoning
-- Creates documentation trail for patient visits
-- Enables supervision and quality improvement
+#### Limitations
 
-### Limitations & Future Work
-
-**Current Limitations:**
-- Requires GPU for reasonable inference speed
-- Image analysis limited to common conditions in training data
-- Drug database covers essential medicines only (supplemented by DDInter online)
-
-**Future Development:**
-- Fine-tune on regional disease patterns
-- Expand drug database with local formularies
-- Multi-language support for diverse CHW populations
-- Integrate with health information systems for continuity of care
+- Requires a GPU for practical inference speed (CPU-only is possible but slow).
+- Image analysis accuracy is bounded by MedGemma's training distribution.
+- Drug interaction checking requires an internet connection (DDInter API).
 
 ---
 
-## Conclusion
+## References
 
-HealthPost demonstrates how MedGemma 1.5's medical AI capabilities can be combined into a practical tool that addresses a real gap in global health. By supporting the complete CHW workflow from intake to dispensing — with transparent agentic reasoning — we can improve both the quality and safety of care for the billions of people who depend on community-based healthcare.
+[1] Sellergren, A. B., et al. "MedGemma: A Collection of Gemma-Based Models for Medical Applications." arXiv:2507.05201, 2025. https://arxiv.org/abs/2507.05201
+
+[2] Wu, C., et al. "LAST: Scalable Lattice-Based Speech Modelling in JAX." Proc. IEEE ICASSP, 2023. https://doi.org/10.1109/ICASSP49357.2023.10096711
+
+[3] Google Health AI. "MedASR Model Card." Health AI Developer Foundations. https://developers.google.com/health-ai-developer-foundations/medasr/model-card
+
+[4] Xiong, G., et al. "DDInter: An Online Drug–Drug Interaction Database Towards Improving Clinical Decision-Making and Patient Safety." Nucleic Acids Research, 50(D1):D1200–D1207, 2022. https://doi.org/10.1093/nar/gkab880
+
+[5] Google Research. "MedGemma and MedASR: Open Models for Health AI." Google Developers Blog, 2025. https://developers.google.com/health-ai-developer-foundations
+
+[6] LangChain, Inc. "LangGraph." GitHub, 2024. https://github.com/langchain-ai/langgraph
 
 ---
 
-**Repository:** [GitHub Link]
+**Repository:** https://github.com/El-Moghazy2/gemma
 
-**Demo Video:** [3-minute demonstration]
-
-**Contact:** [Team Information]
+**Live Demo:** https://huggingface.co/spaces/ElMoghazy/healthpost
 
 ---
 

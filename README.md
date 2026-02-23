@@ -26,7 +26,7 @@ Community Health Workers serve as BOTH primary doctor AND pharmacist for 80% of 
 
 ## The Solution
 
-HealthPost combines MedGemma 1.5 capabilities into one seamless workflow:
+HealthPost combines MedGemma + MedASR capabilities into one seamless workflow:
 
 ```
 PATIENT VISIT ─────────────────────────────────────────────────────►
@@ -36,39 +36,39 @@ PATIENT VISIT ──────────────────────
   │             │    │             │    │             │    │             │
   │ Voice: sym- │    │ Photo: rash │    │ AI suggests │    │ Scan exist- │
   │ ptom descr. │    │ wound, eyes │    │ treatment   │    │ ing meds    │
-  │ (MedASR)    │    │(MedGemma1.5)│    │ options     │    │ Check safety│
+  │ (MedASR)    │    │ (MedGemma)  │    │ options     │    │ Check safety│
   └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
 ```
 
 ## Features
 
 - **Voice Symptom Capture**: Record patient descriptions using MedASR
-- **Medical Image Analysis**: Analyze skin conditions, wounds, and eyes using MedGemma 1.5 Vision
+- **Medical Image Analysis**: Analyze skin conditions, wounds, and eyes using MedGemma Vision
 - **AI-Powered Diagnosis**: Get diagnosis with confidence scores and differential diagnoses
-- **Agentic Reasoning**: MedGemma 1.5 autonomously reasons through cases step-by-step (ReAct agent loop)
+- **Structured Clinical Reasoning**: MedGemma generates validated JSON clinical assessments (diagnosis, treatment, referral)
 - **Treatment Recommendations**: Evidence-based treatment plans appropriate for CHW level
-- **Drug Interaction Checking**: Offline database with 300+ essential medicines + DDInter API
+- **Drug Interaction Checking**: DDInter API with 302K+ drug-drug interaction associations
 - **Referral Guidance**: Know when to escalate to hospital
-- **Works Offline**: Designed for edge deployment without internet
+- **Edge Deployment**: Model inference runs locally; drug interaction checks use DDInter API when online
 
 ## Quick Start
 
 ### Prerequisites
 
-HealthPost requires **MedGemma 1.5** via HuggingFace. You need:
+HealthPost requires **MedGemma** via HuggingFace. You need:
 - Python 3.10+
 - `transformers` and `torch` installed
-- Access to `google/medgemma-1.5-4b-it` on HuggingFace (gated model — see below)
+- Access to `google/medgemma-4b-it` on HuggingFace (gated model — see below)
 - A CUDA GPU is recommended (4-bit quantization needs ~4 GB VRAM)
 
 The app will **not** start without `transformers` and `torch` — there are no fallback backends.
 
 ### HuggingFace Authentication
 
-MedGemma 1.5 is a **gated model**. You must request access and authenticate before using it:
+MedGemma is a **gated model**. You must request access and authenticate before using it:
 
 1. **Create a HuggingFace account** at https://huggingface.co/join (if you don't have one)
-2. **Request access** to the model at https://huggingface.co/google/medgemma-1.5-4b-it — accept Google's license terms
+2. **Request access** to the model at https://huggingface.co/google/medgemma-4b-it — accept Google's license terms
 3. **Create an access token** at https://huggingface.co/settings/tokens (select `read` scope)
 4. **Log in** from your terminal:
 
@@ -90,7 +90,7 @@ set HF_TOKEN=hf_your_token_here      # Windows cmd
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-repo/healthpost.git
+git clone https://github.com/El-Moghazy2/gemma.git
 cd healthpost
 
 # Create virtual environment
@@ -125,7 +125,7 @@ from huggingface_hub import login
 login()  # Paste your HF token when prompted
 
 # Clone the repo
-!git clone https://github.com/your-repo/healthpost.git
+!git clone https://github.com/El-Moghazy2/gemma.git
 %cd healthpost
 
 # Run the app
@@ -139,18 +139,18 @@ app.launch(share=True)
 ```
 healthpost/
 ├── __init__.py          # Package initialization
-├── config.py            # Configuration (MedGemma 1.5 settings)
+├── config.py            # Configuration (MedGemma settings)
 ├── core.py              # Main HealthPost orchestrator
-├── agent.py             # ReAct agent for autonomous clinical reasoning
+├── visit_graph.py       # LangGraph StateGraph patient visit pipeline
 ├── voice.py             # Voice transcription (MedASR)
-├── vision.py            # Medical image analysis (MedGemma 1.5 Vision)
-├── triage.py            # Diagnosis and treatment reasoning (MedGemma 1.5 Text)
-├── drugs.py             # Drug database and interactions
+├── vision.py            # Medical image analysis (MedGemma Vision)
+├── triage.py            # Diagnosis and treatment reasoning (MedGemma Text)
+├── drugs.py             # Drug interaction checking (DDInter API)
 ├── ddinter_api.py       # DDInter drug interaction API client
 └── rxnorm_api.py        # RxNorm API for drug name resolution
 
 app.py                   # Gradio web interface
-data/drugs.db            # SQLite drug database
+data/drugs.db            # Drug reference data
 requirements.txt         # Python dependencies
 README.md                # This file
 TECHNICAL_WRITEUP.md     # Detailed technical writeup
@@ -158,56 +158,36 @@ TECHNICAL_WRITEUP.md     # Detailed technical writeup
 
 ## Usage Guide
 
-### Quick Workflow (Recommended)
+### Clinical Workspace
 
-1. Go to the **Quick Workflow** tab
-2. Record or type patient symptoms
-3. Upload any relevant medical images
-4. List current medications (optional)
-5. Enable **Agentic Workflow** for autonomous step-by-step reasoning
-6. Click **Run Complete Workflow**
-7. Review the comprehensive visit summary and AI reasoning trace
-
-### Step-by-Step Workflow
-
-For more control, use the **Step-by-Step** tab:
-
-1. **INTAKE**: Record voice or type symptoms
-2. **DIAGNOSE**: Upload and analyze medical images
-3. **PRESCRIBE**: Generate diagnosis and treatment plan
-4. **DISPENSE**: Check drug interactions before dispensing
-
-### Drug Reference
-
-Use the **Drug Reference** tab to:
-- Look up drug information
-- Check interactions between any medications
-- Get alternative medication suggestions when interactions are found
+1. Open the **Clinical Workspace** tab
+2. Enter patient symptoms via text or record audio (MedASR transcription)
+3. Optionally upload medical images (skin conditions, wounds, etc.)
+4. Optionally enter current medications (text or photo of medication label)
+5. Click **Run Complete Workflow** to get a full clinical assessment
+6. Review the diagnosis, treatment plan, drug interaction checks, and referral guidance
+7. Use the follow-up chat to ask clarifying questions about the assessment
 
 ## Technical Details
 
 ### Models Used
 
-| Model | Task | Purpose |
-|-------|------|---------|
-| MedASR | Speech-to-text | Transcribe symptom descriptions |
-| MedGemma 1.5 4B | Vision | Analyze medical images |
-| MedGemma 1.5 4B | Vision | Extract text from prescriptions |
-| MedGemma 1.5 4B | Reasoning | Generate diagnosis and treatment |
-| MedGemma 1.5 4B | Agentic | Autonomous ReAct clinical reasoning |
+| Model | ID | Task | Purpose |
+|-------|-----|------|---------|
+| MedASR | `google/medasr` | Speech-to-text | Transcribe symptom descriptions |
+| MedGemma 4B | `google/medgemma-4b-it` | Vision + text reasoning | Medical image analysis, diagnosis, treatment plans, structured JSON assessments |
 
-### Drug Database
+### Drug Interaction Checking
 
-- **Coverage**: WHO Essential Medicines List (~300 drugs)
-- **Format**: SQLite for offline use
-- **Online enrichment**: DDInter API for additional interaction data
-- **Data includes**: Drug info, classes, contraindications, common doses, interactions
+- **Source**: DDInter API — 302,516 drug-drug interaction associations between 2,290 drugs
+- **Data sources**: Compiled from DrugBank, KEGG, and other authoritative databases
+- **Features**: Severity levels, clinical descriptions, management recommendations
 
 ### Edge Deployment
 
 For mobile deployment:
 - Uses 4-bit quantization to reduce model size (~4 GB VRAM)
-- SQLite database works offline
+- Model inference runs locally after initial download
 - Gradio can be wrapped in Android WebView
 
 ## Safety Notice
@@ -222,7 +202,7 @@ For mobile deployment:
 ## Evaluation Metrics
 
 - Full workflow completes in < 30 seconds on T4 GPU
-- Works completely offline after model download
+- Model inference works locally after initial download; drug interaction checks require internet
 - Covers common CHW scenarios: malaria, respiratory infections, skin conditions, wounds
 
 ## Contributing
@@ -233,10 +213,18 @@ This project was built for the MedGemma Impact Challenge. Contributions welcome!
 
 MIT License - See LICENSE file
 
+## References
+
+- Sellergren, A. B., et al. "MedGemma: A Collection of Gemma-Based Models for Medical Applications." arXiv:2507.05201, 2025.
+- Wu, C., et al. "LAST: Scalable Lattice-Based Speech Modelling in JAX." Proc. IEEE ICASSP, 2023.
+- Google Health AI. "MedASR Model Card." https://developers.google.com/health-ai-developer-foundations/medasr/model-card
+- Xiong, G., et al. "DDInter: An Online Drug–Drug Interaction Database." Nucleic Acids Research, 50(D1), 2022.
+- LangChain, Inc. "LangGraph." https://github.com/langchain-ai/langgraph
+
 ## Acknowledgments
 
-- Google for MedGemma 1.5 models
-- WHO Essential Medicines List
+- Google for MedGemma and MedASR models
+- DDInter drug interaction database
 - Community Health Workers worldwide who inspired this project
 
 ---
