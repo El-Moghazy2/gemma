@@ -833,7 +833,7 @@ def _format_result_markdown(result: Any, hp: Any) -> str:
                 "mild": "MILD",
             }.get(interaction.severity, interaction.severity)
             drug_pair = " + ".join(interaction.drugs)
-            desc = interaction.description[:120]
+            desc = interaction.description
             lines.append(f"- {sev}: {drug_pair} \u2014 {desc}")
         lines.append("")
 
