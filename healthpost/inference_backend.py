@@ -191,6 +191,16 @@ class TransformersBackend:
         temperature: float = 0.3,
         max_tokens: int = 512,
     ) -> str:
+        """Generate a text response from a prompt.
+
+        Args:
+            prompt: Input text prompt.
+            temperature: Sampling temperature.
+            max_tokens: Maximum tokens to generate.
+
+        Returns:
+            Generated text string.
+        """
         messages = [{"role": "user", "content": prompt}]
         return self._generate(messages, temperature, max_tokens)
 
@@ -201,6 +211,20 @@ class TransformersBackend:
         temperature: float = 0.3,
         max_tokens: int = 512,
     ) -> str:
+        """Generate a response from an image and prompt.
+
+        Args:
+            image: PIL Image to analyze.
+            prompt: Text prompt accompanying the image.
+            temperature: Sampling temperature.
+            max_tokens: Maximum tokens to generate.
+
+        Returns:
+            Generated text string.
+
+        Raises:
+            ValueError: If *image* is not a PIL Image.
+        """
         from PIL import Image as PILImage
 
         if not isinstance(image, PILImage.Image):
@@ -252,6 +276,17 @@ class TransformersBackend:
         temperature: float = 0.3,
         max_tokens: int = 512,
     ) -> str:
+        """Generate a response from a multi-turn conversation.
+
+        Args:
+            messages: Full conversation including system, history, and
+                user messages.
+            temperature: Sampling temperature.
+            max_tokens: Maximum tokens to generate.
+
+        Returns:
+            The assistant's response text.
+        """
         return self._generate(messages, temperature, max_tokens)
 
     # -- helpers ------------------------------------------------------------
@@ -300,6 +335,16 @@ class OllamaBackend:
         temperature: float = 0.3,
         max_tokens: int = 512,
     ) -> str:
+        """Generate a text response from a prompt via Ollama.
+
+        Args:
+            prompt: Input text prompt.
+            temperature: Sampling temperature.
+            max_tokens: Maximum tokens to generate.
+
+        Returns:
+            Generated text string.
+        """
         import ollama
 
         logger.info(
@@ -330,6 +375,20 @@ class OllamaBackend:
         temperature: float = 0.3,
         max_tokens: int = 512,
     ) -> str:
+        """Generate a response from an image and prompt via Ollama.
+
+        Args:
+            image: PIL Image to analyze.
+            prompt: Text prompt accompanying the image.
+            temperature: Sampling temperature.
+            max_tokens: Maximum tokens to generate.
+
+        Returns:
+            Generated text string.
+
+        Raises:
+            ValueError: If *image* is not a PIL Image.
+        """
         import base64
 
         import ollama
@@ -414,6 +473,17 @@ class OllamaBackend:
         temperature: float = 0.3,
         max_tokens: int = 512,
     ) -> str:
+        """Generate a response from a multi-turn conversation via Ollama.
+
+        Args:
+            messages: Full conversation including system, history, and
+                user messages.
+            temperature: Sampling temperature.
+            max_tokens: Maximum tokens to generate.
+
+        Returns:
+            The assistant's response text.
+        """
         import ollama
 
         logger.info(

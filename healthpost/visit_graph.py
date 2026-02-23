@@ -56,12 +56,26 @@ def build_visit_graph(
     """
 
     def _notify(step_name: str, description: str) -> None:
+        """Log a pipeline step and forward to the progress callback.
+
+        Args:
+            step_name: Short identifier for the pipeline step.
+            description: Human-readable progress message.
+        """
         logger.info("Pipeline step: %s - %s", step_name, description)
         if on_progress:
             on_progress(step_name, description)
 
     def intake(state: VisitState) -> dict:
-        """Transcribe audio or use text symptoms."""
+        """Transcribe audio or use text symptoms.
+
+        Args:
+            state: Current visit state with audio/text inputs.
+
+        Returns:
+            State update with ``symptoms`` and empty collection
+            defaults.
+        """
         _notify("intake", "Capturing symptoms...")
         audio = state.get("audio")
         symptoms_text = state.get("symptoms_text")
@@ -84,7 +98,14 @@ def build_visit_graph(
         }
 
     def analyze_images(state: VisitState) -> dict:
-        """Run vision analysis on each provided image."""
+        """Run vision analysis on each provided image.
+
+        Args:
+            state: Current visit state with ``images`` list.
+
+        Returns:
+            State update with ``visual_findings``.
+        """
         _notify("analyze_images", "Analyzing medical images...")
         images = state.get("images", [])
         visual_findings: List[str] = []
@@ -100,7 +121,14 @@ def build_visit_graph(
         return {"visual_findings": visual_findings}
 
     def extract_meds(state: VisitState) -> dict:
-        """Extract medications from photo and merge with text list."""
+        """Extract medications from photo and merge with text list.
+
+        Args:
+            state: Current visit state with medication photo/list.
+
+        Returns:
+            State update with deduplicated ``current_meds``.
+        """
         _notify("extract_meds", "Extracting medications...")
         existing_meds_photo = state.get("existing_meds_photo")
         existing_meds_list = state.get("existing_meds_list")
@@ -121,7 +149,14 @@ def build_visit_graph(
         return {"current_meds": current_meds}
 
     def diagnose(state: VisitState) -> dict:
-        """Run the triage diagnosis pipeline."""
+        """Run the triage diagnosis pipeline.
+
+        Args:
+            state: Current visit state with symptoms and findings.
+
+        Returns:
+            State update with ``diagnosis`` and ``treatment_plan``.
+        """
         _notify("diagnose", "Generating diagnosis...")
         diagnosis, treatment = hp.triage.diagnose_and_treat(
             symptoms=state["symptoms"],
@@ -139,7 +174,15 @@ def build_visit_graph(
         }
 
     def check_drugs(state: VisitState) -> dict:
-        """Check drug interactions between current and proposed meds."""
+        """Check drug interactions between current and proposed meds.
+
+        Args:
+            state: Current visit state with medications and treatment.
+
+        Returns:
+            State update with ``drug_interactions`` and
+            ``is_safe_to_proceed``.
+        """
         _notify("check_drugs", "Checking drug interactions...")
         current_meds = state.get("current_meds", [])
         treatment = state.get("treatment_plan")
@@ -166,7 +209,14 @@ def build_visit_graph(
         }
 
     def find_alternatives(state: VisitState) -> dict:
-        """Suggest alternative medications for those with interactions."""
+        """Suggest alternative medications for those with interactions.
+
+        Args:
+            state: Current visit state with interactions and treatment.
+
+        Returns:
+            State update with ``alternative_medications`` mapping.
+        """
         _notify("alternatives", "Finding alternative medications...")
         interactions = state.get("drug_interactions", [])
         diagnosis = state.get("diagnosis")
@@ -179,7 +229,15 @@ def build_visit_graph(
         return {"alternative_medications": alternatives}
 
     def assess_safety(state: VisitState) -> dict:
-        """Determine referral need and overall confidence."""
+        """Determine referral need and overall confidence.
+
+        Args:
+            state: Current visit state with diagnosis and interactions.
+
+        Returns:
+            State update with ``needs_referral``, ``referral_reason``,
+            and ``overall_confidence``.
+        """
         _notify("safety", "Assessing safety and referral needs...")
         diagnosis = state.get("diagnosis")
         treatment = state.get("treatment_plan")
@@ -202,14 +260,30 @@ def build_visit_graph(
     # --- Routing functions ---
 
     def route_after_intake(state: VisitState) -> str:
-        """Skip image analysis if no images provided."""
+        """Skip image analysis if no images provided.
+
+        Args:
+            state: Current visit state.
+
+        Returns:
+            Next node name: ``"analyze_images"`` or
+            ``"extract_meds"``.
+        """
         images = state.get("images")
         if images:
             return "analyze_images"
         return "extract_meds"
 
     def route_after_drugs(state: VisitState) -> str:
-        """Skip find_alternatives if no interactions."""
+        """Skip find_alternatives if no interactions.
+
+        Args:
+            state: Current visit state.
+
+        Returns:
+            Next node name: ``"find_alternatives"`` or
+            ``"assess_safety"``.
+        """
         interactions = state.get("drug_interactions", [])
         if interactions:
             return "find_alternatives"

@@ -16,7 +16,22 @@ logger = logging.getLogger(__name__)
 
 
 class PatientVisitResult(BaseModel):
-    """Complete result from a patient visit workflow."""
+    """Complete result from a patient visit workflow.
+
+    Attributes:
+        symptoms_text: Transcribed or typed patient symptoms.
+        visual_findings: Findings from medical image analysis.
+        current_medications: Patient's existing medication names.
+        diagnosis: AI-generated diagnosis.
+        treatment_plan: AI-generated treatment plan.
+        drug_interactions: Detected drug-drug interactions.
+        is_safe_to_proceed: ``True`` if no severe interactions found.
+        needs_referral: ``True`` if the patient should be referred.
+        referral_reason: Explanation when referral is needed.
+        overall_confidence: Aggregate confidence score (0-1).
+        alternative_medications: Mapping of problematic drug to
+            suggested alternative.
+    """
 
     symptoms_text: str
     visual_findings: List[str]
@@ -166,7 +181,16 @@ class PatientVisitResult(BaseModel):
 
 
 def build_chat_system_prompt(visit_result: "PatientVisitResult") -> str:
-    """Build a system prompt from a completed patient visit result."""
+    """Build a system prompt from a completed patient visit result.
+
+    Args:
+        visit_result: The completed ``PatientVisitResult`` to
+            summarize.
+
+    Returns:
+        System prompt string with diagnosis context and response
+        rules.
+    """
     meds_lines = []
     for med in visit_result.treatment_plan.medications:
         dur = f" for {med.duration}" if med.duration else ""
@@ -224,6 +248,12 @@ class HealthPost:
     """
 
     def __init__(self, config: Optional[Config] = None) -> None:
+        """Initialize HealthPost with the given configuration.
+
+        Args:
+            config: Application configuration. Uses ``default_config``
+                when ``None``.
+        """
         self.config = config or default_config
 
         self._voice: Optional[VoiceTranscriber] = None
@@ -372,7 +402,16 @@ class HealthPost:
         treatment: TreatmentPlan,
         interactions: List[DrugInteraction],
     ) -> tuple[bool, Optional[str]]:
-        """Determine whether the patient should be referred."""
+        """Determine whether the patient should be referred.
+
+        Args:
+            diagnosis: The AI-generated diagnosis.
+            treatment: The AI-generated treatment plan.
+            interactions: Detected drug-drug interactions.
+
+        Returns:
+            Tuple of ``(needs_referral, reason_string_or_None)``.
+        """
         if diagnosis.confidence < self.config.confidence_threshold:
             return (
                 True,
@@ -410,7 +449,16 @@ class HealthPost:
         visual_findings: List[str],
         interactions: List[DrugInteraction],
     ) -> float:
-        """Calculate an aggregate confidence score."""
+        """Calculate an aggregate confidence score.
+
+        Args:
+            diagnosis: The AI-generated diagnosis.
+            visual_findings: Findings from image analysis.
+            interactions: Detected drug-drug interactions.
+
+        Returns:
+            Adjusted confidence float between 0.0 and 1.0.
+        """
         confidence = diagnosis.confidence
 
         if visual_findings:
@@ -427,7 +475,17 @@ class HealthPost:
         interactions: List[DrugInteraction],
         current_meds: List[str],
     ) -> Dict[str, str]:
-        """Suggest alternatives for recommended drugs with interactions."""
+        """Suggest alternatives for recommended drugs with interactions.
+
+        Args:
+            diagnosis: The AI-generated diagnosis.
+            treatment: The AI-generated treatment plan.
+            interactions: Detected drug-drug interactions.
+            current_meds: Patient's existing medication names.
+
+        Returns:
+            Mapping of problematic drug name to suggested alternative.
+        """
         alternatives: Dict[str, str] = {}
         recommended_drugs = {
             m.name.lower(): m.name for m in treatment.medications
@@ -457,7 +515,17 @@ class HealthPost:
         interaction: DrugInteraction,
         current_meds: List[str],
     ) -> Optional[str]:
-        """Ask the triage agent to suggest a single alternative drug."""
+        """Ask the triage agent to suggest a single alternative drug.
+
+        Args:
+            condition: Diagnosed condition name.
+            problematic_drug: Drug that has an interaction.
+            interaction: The triggering interaction details.
+            current_meds: Patient's existing medication names.
+
+        Returns:
+            Alternative medication name and dosage, or ``None``.
+        """
         current_str = (
             ", ".join(current_meds)
             if current_meds
@@ -539,19 +607,47 @@ class HealthPost:
         return response
 
     def transcribe_symptoms(self, audio: Any) -> str:
-        """Transcribe an audio recording of symptoms."""
+        """Transcribe an audio recording of symptoms.
+
+        Args:
+            audio: NumPy audio array from Gradio.
+
+        Returns:
+            Transcribed symptom text.
+        """
         return self.voice.transcribe(audio)
 
     def analyze_image(self, image: Any) -> List[str]:
-        """Analyze a medical image."""
+        """Analyze a medical image.
+
+        Args:
+            image: PIL Image or NumPy array.
+
+        Returns:
+            List of clinical finding strings.
+        """
         return self.vision.analyze_medical_image(image)
 
     def extract_medications(self, image: Any) -> List[str]:
-        """Extract medication names from a photo."""
+        """Extract medication names from a photo.
+
+        Args:
+            image: PIL Image or NumPy array of medication labels.
+
+        Returns:
+            List of extracted medication name strings.
+        """
         return self.vision.extract_medications(image)
 
     def check_drug_interactions(
         self, medications: List[str],
     ) -> List[DrugInteraction]:
-        """Check for drug-drug interactions."""
+        """Check for drug-drug interactions.
+
+        Args:
+            medications: List of medication names to check pairwise.
+
+        Returns:
+            List of detected interactions.
+        """
         return self.drug_db.check_interactions(medications)

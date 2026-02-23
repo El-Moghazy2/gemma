@@ -35,7 +35,11 @@ _healthpost: Optional[HealthPost] = None
 
 
 def get_healthpost() -> HealthPost:
-    """Return the lazily-initialized ``HealthPost`` singleton."""
+    """Return the lazily-initialized ``HealthPost`` singleton.
+
+    Returns:
+        The shared ``HealthPost`` instance, created on first call.
+    """
     global _healthpost
     if _healthpost is None:
         logger.info("Initializing HealthPost...")
@@ -44,7 +48,15 @@ def get_healthpost() -> HealthPost:
 
 
 def _get_backend_badge(component: str) -> str:
-    """Return a Markdown badge showing the active model for *component*."""
+    """Return a Markdown badge showing the active model for *component*.
+
+    Args:
+        component: Subsystem key (``"triage"``, ``"vision"``, or
+            ``"voice"``).
+
+    Returns:
+        Inline Markdown code span identifying the model.
+    """
     badges = {
         "triage": "`MedGemma Text`",
         "vision": "`MedGemma Vision`",
@@ -96,7 +108,14 @@ DEMO_SCENARIOS = {
 def load_demo_scenario(
     scenario_name: str,
 ) -> Tuple[str, str, str]:
-    """Load a demo scenario into the Quick Workflow form fields."""
+    """Load a demo scenario into the Quick Workflow form fields.
+
+    Args:
+        scenario_name: Key in ``DEMO_SCENARIOS``.
+
+    Returns:
+        Tuple of ``(symptoms, age, medications)`` strings.
+    """
     if scenario_name not in DEMO_SCENARIOS:
         return "", "", ""
     s = DEMO_SCENARIOS[scenario_name]
@@ -105,7 +124,14 @@ def load_demo_scenario(
 
 @spaces.GPU(duration=300)
 def _transcribe_audio_gpu(audio: Any) -> Tuple[str, str]:
-    """GPU-accelerated transcription helper."""
+    """GPU-accelerated transcription helper.
+
+    Args:
+        audio: NumPy audio array from Gradio.
+
+    Returns:
+        Tuple of ``(transcribed_text, source_label_markdown)``.
+    """
     hp = get_healthpost()
     text = hp.transcribe_symptoms(audio)
     source = hp.voice.source_label
@@ -113,7 +139,14 @@ def _transcribe_audio_gpu(audio: Any) -> Tuple[str, str]:
 
 
 def transcribe_audio(audio: Any) -> Tuple[str, str]:
-    """Transcribe an audio recording of symptoms."""
+    """Transcribe an audio recording of symptoms.
+
+    Args:
+        audio: NumPy audio array from Gradio, or ``None``.
+
+    Returns:
+        Tuple of ``(transcribed_text, source_label_markdown)``.
+    """
     if audio is None:
         return "", ""
 
@@ -126,7 +159,16 @@ def transcribe_audio(audio: Any) -> Tuple[str, str]:
 
 @spaces.GPU(duration=300)
 def _analyze_image_gpu(image: Any, image_type: str) -> dict:
-    """GPU-accelerated image analysis helper."""
+    """GPU-accelerated image analysis helper.
+
+    Args:
+        image: NumPy image array from Gradio.
+        image_type: One of ``"Skin/Rash"``, ``"Wound"``, or
+            ``"General"``.
+
+    Returns:
+        Dict with analysis results keyed by finding type.
+    """
     hp = get_healthpost()
     if image_type == "Skin/Rash":
         return hp.vision.analyze_skin_condition(image)
@@ -138,7 +180,15 @@ def _analyze_image_gpu(image: Any, image_type: str) -> dict:
 
 
 def analyze_medical_image(image: Any, image_type: str) -> str:
-    """Analyze a medical image and return formatted findings."""
+    """Analyze a medical image and return formatted findings.
+
+    Args:
+        image: NumPy image array from Gradio, or ``None``.
+        image_type: Category label for the image.
+
+    Returns:
+        Markdown-formatted analysis string.
+    """
     if image is None:
         return ""
 
@@ -163,7 +213,16 @@ def analyze_medical_image(image: Any, image_type: str) -> str:
 
 @spaces.GPU(duration=300)
 def _diagnose_gpu(symptoms_text: str, findings_list: List[str], patient_age: Optional[str]):
-    """GPU-accelerated diagnosis helper."""
+    """GPU-accelerated diagnosis helper.
+
+    Args:
+        symptoms_text: Patient symptom description.
+        findings_list: Visual findings from image analysis.
+        patient_age: Age description, or ``None``.
+
+    Returns:
+        Tuple of ``(Diagnosis, TreatmentPlan)``.
+    """
     hp = get_healthpost()
     return hp.triage.diagnose_and_treat(
         symptoms=symptoms_text,
@@ -180,6 +239,15 @@ def generate_diagnosis(
     """Generate a diagnosis and treatment plan.
 
     Yields a loading indicator first, then the final result.
+
+    Args:
+        symptoms_text: Patient symptom description.
+        visual_findings: Newline-separated visual findings.
+        patient_age: Age description string.
+
+    Yields:
+        Tuples of ``(diagnosis_md, treatment_md, referral_md,
+        trace_md)``.
     """
     yield "**Analyzing...**", "", "", "*Starting...*"
 
@@ -202,16 +270,32 @@ def generate_diagnosis(
             patient_age if patient_age else None,
         )
 
+        evidence_lines = (
+            "\n".join(f"- {e}" for e in diagnosis.supporting_evidence)
+            if diagnosis.supporting_evidence
+            else "- Based on reported symptoms"
+        )
+        differential_lines = (
+            "\n".join(f"- {d}" for d in diagnosis.differential_diagnoses)
+            if diagnosis.differential_diagnoses
+            else "- No alternative diagnoses identified"
+        )
+        known_symptoms_lines = (
+            "\n".join(f"- {s}" for s in diagnosis.known_symptoms)
+            if diagnosis.known_symptoms
+            else "- Verify symptoms with patient"
+        )
+
         diagnosis_text = (
             f"**Powered by:** {badge}\n\n---\n\n"
             f"### {diagnosis.condition}\n\n"
             f"**Confidence:** {diagnosis.confidence:.0%}\n\n"
             f"**Supporting Evidence:**\n"
-            f"{chr(10).join(f'- {e}' for e in diagnosis.supporting_evidence) if diagnosis.supporting_evidence else '- Based on reported symptoms'}\n\n"
+            f"{evidence_lines}\n\n"
             f"**Differential Diagnoses:**\n"
-            f"{chr(10).join(f'- {d}' for d in diagnosis.differential_diagnoses) if diagnosis.differential_diagnoses else '- No alternative diagnoses identified'}\n\n"
+            f"{differential_lines}\n\n"
             f"**Known Symptoms** *(verify with patient):*\n"
-            f"{chr(10).join(f'- {s}' for s in diagnosis.known_symptoms) if diagnosis.known_symptoms else '- Verify symptoms with patient'}\n"
+            f"{known_symptoms_lines}\n"
         )
 
         meds_text = "\n".join(
@@ -221,8 +305,16 @@ def generate_diagnosis(
             for m in treatment.medications
         ) if treatment.medications else "- Supportive care only"
 
-        instructions_text = chr(10).join(f'- {i}' for i in treatment.instructions) if treatment.instructions else '- Follow healthcare provider guidance'
-        warnings_text = chr(10).join(f'- {w}' for w in treatment.warning_signs) if treatment.warning_signs else '- Seek care if symptoms worsen or new symptoms appear'
+        instructions_text = (
+            "\n".join(f"- {i}" for i in treatment.instructions)
+            if treatment.instructions
+            else "- Follow healthcare provider guidance"
+        )
+        warnings_text = (
+            "\n".join(f"- {w}" for w in treatment.warning_signs)
+            if treatment.warning_signs
+            else "- Seek care if symptoms worsen or new symptoms appear"
+        )
 
         treatment_text = (
             f"### Medications\n{meds_text}\n\n"
@@ -261,13 +353,27 @@ def generate_diagnosis(
 
 @spaces.GPU(duration=300)
 def _extract_medications_gpu(image: Any) -> List[str]:
-    """GPU-accelerated medication extraction helper."""
+    """GPU-accelerated medication extraction helper.
+
+    Args:
+        image: NumPy image array of medication labels.
+
+    Returns:
+        List of extracted medication name strings.
+    """
     hp = get_healthpost()
     return hp.vision.extract_medications(image)
 
 
 def extract_medications_from_photo(image: Any) -> str:
-    """Extract medication names from a photo of labels."""
+    """Extract medication names from a photo of labels.
+
+    Args:
+        image: NumPy image array, or ``None``.
+
+    Returns:
+        Newline-separated medication names, or an error string.
+    """
     if image is None:
         return ""
 
@@ -283,7 +389,16 @@ def check_drug_interactions(
     current_meds_text: str,
     proposed_meds_text: str,
 ) -> Tuple[str, List[Any], List[str]]:
-    """Check for drug-drug interactions."""
+    """Check for drug-drug interactions.
+
+    Args:
+        current_meds_text: Newline-separated current medication names.
+        proposed_meds_text: Newline-separated proposed medication names.
+
+    Returns:
+        Tuple of ``(markdown_report, interactions_list,
+        dropdown_choices)``.
+    """
     if not current_meds_text.strip() and not proposed_meds_text.strip():
         return "Enter medications to check", [], []
 
@@ -364,7 +479,17 @@ def get_alternative_for_interaction(
     current_meds_text: str,
     proposed_meds_text: str,
 ) -> str:
-    """Suggest an alternative medication for a selected interaction."""
+    """Suggest an alternative medication for a selected interaction.
+
+    Args:
+        selected_interaction: Dropdown label of the chosen interaction.
+        interactions_list: Full list of interaction objects.
+        current_meds_text: Newline-separated current medication names.
+        proposed_meds_text: Newline-separated proposed medication names.
+
+    Returns:
+        Markdown-formatted alternative suggestion.
+    """
     if not selected_interaction or not interactions_list:
         return ""
 
@@ -445,7 +570,16 @@ def update_interaction_ui(
     interactions_list: List[Any],
     dropdown_choices: List[str],
 ):
-    """Update visibility of the interaction-resolution UI components."""
+    """Update visibility of the interaction-resolution UI components.
+
+    Args:
+        interaction_result: Markdown report from the interaction check.
+        interactions_list: List of interaction objects.
+        dropdown_choices: Labels for the interaction dropdown.
+
+    Returns:
+        Tuple of Gradio updates for ``(dropdown, button, alt_output)``.
+    """
     has_interactions = len(interactions_list) > 0
     return (
         gr.update(
@@ -464,7 +598,17 @@ def _run_pipeline_gpu(
     meds: List[str],
     age: Optional[str],
 ):
-    """GPU-accelerated patient visit pipeline."""
+    """GPU-accelerated patient visit pipeline.
+
+    Args:
+        symptoms: Patient symptom description.
+        images: List of medical image arrays.
+        meds: Current medication names.
+        age: Patient age description, or ``None``.
+
+    Returns:
+        ``PatientVisitResult`` from the complete workflow.
+    """
     hp = get_healthpost()
     return hp.patient_visit(
         symptoms_text=symptoms,
@@ -484,9 +628,18 @@ def run_complete_workflow(
 ):
     """Run the complete patient visit workflow.
 
-    Yields tuples of ``(markdown, visit_result, header_visible,
-    chatbot_visible, input_row_visible)`` so the chat section
-    can appear after workflow completion.
+    Args:
+        audio: NumPy audio array, or ``None``.
+        symptoms_text: Text description of symptoms.
+        medical_image: NumPy image array, or ``None``.
+        patient_age: Age description string.
+        current_meds_photo: NumPy image of medication labels, or
+            ``None``.
+        current_meds_text: Newline-separated medication names.
+
+    Yields:
+        Tuples of ``(markdown, visit_result, header_visible,
+        chatbot_visible, input_row_visible)``.
     """
     hide = gr.update(visible=False)
     yield "**Starting workflow...**", None, hide, hide, hide
@@ -532,8 +685,17 @@ def run_complete_workflow(
 
 
 @spaces.GPU(duration=300)
-def _chat_respond_gpu(message: str, conversation_messages: list, visit_result) -> str:
-    """GPU-accelerated chat response helper."""
+def _chat_respond_gpu(message: str, conversation_messages: list, visit_result: Any) -> str:
+    """GPU-accelerated chat response helper.
+
+    Args:
+        message: The health worker's new question.
+        conversation_messages: Previous conversation role/content dicts.
+        visit_result: Completed ``PatientVisitResult``.
+
+    Returns:
+        The assistant's response text.
+    """
     hp = get_healthpost()
     return hp.chat(message, conversation_messages, visit_result)
 
@@ -542,12 +704,19 @@ def chat_respond(
     message: str,
     chat_history: list,
     conversation_messages: list,
-    visit_result,
+    visit_result: Any,
 ):
     """Handle a chat message in the post-diagnosis chat.
 
-    Returns updated chatbot history, cleared textbox, and updated
-    conversation messages state.
+    Args:
+        message: The health worker's new question.
+        chat_history: Gradio chatbot message history.
+        conversation_messages: Full conversation role/content dicts.
+        visit_result: Completed ``PatientVisitResult``, or ``None``.
+
+    Returns:
+        Tuple of ``(updated_history, cleared_textbox,
+        updated_messages)``.
     """
     if not message.strip():
         return chat_history, "", conversation_messages
@@ -576,8 +745,16 @@ def chat_respond(
     return chat_history, "", conversation_messages
 
 
-def _format_result_markdown(result, hp) -> str:
-    """Format a ``PatientVisitResult`` as rich Markdown."""
+def _format_result_markdown(result: Any, hp: Any) -> str:
+    """Format a ``PatientVisitResult`` as rich Markdown.
+
+    Args:
+        result: Completed ``PatientVisitResult``.
+        hp: ``HealthPost`` instance (used for badge labels).
+
+    Returns:
+        Multi-section Markdown string for the diagnostic report.
+    """
     lines: List[str] = []
 
     triage_badge = _get_backend_badge("triage")
@@ -806,7 +983,7 @@ FOOTER_HTML = """
 ">
     <strong style="color: #1A1F2E;">HealthPost</strong> &mdash;
     Supporting CHWs to deliver better care &nbsp;|&nbsp;
-    Built with ❤️ for the MedGemma Impact Challenge 2025
+    Built for the MedGemma Impact Challenge 2025
 </div>
 """
 
@@ -1205,7 +1382,11 @@ textarea:focus, input:focus, .gr-input:focus {
 
 
 def create_interface() -> gr.Blocks:
-    """Build and return the Gradio ``Blocks`` application."""
+    """Build and return the Gradio ``Blocks`` application.
+
+    Returns:
+        Configured ``gr.Blocks`` instance ready for ``.launch()``.
+    """
     with gr.Blocks(
         title="HealthPost \u2014 AI Clinical Decision Support",
         theme=theme,
@@ -1242,13 +1423,13 @@ def create_interface() -> gr.Blocks:
 
         with gr.Tabs(elem_id="main-tabs"):
 
-            with gr.Tab("🩺 Clinical Workspace"):
+            with gr.Tab("Clinical Workspace"):
 
                 # Demo loader
                 with gr.Group():
                     demo_dropdown = gr.Dropdown(
                         choices=list(DEMO_SCENARIOS.keys()),
-                        label="🧪 Load a demo scenario (optional)",
+                        label="Load a demo scenario (optional)",
                         value=None,
                         interactive=True,
                     )
@@ -1280,7 +1461,7 @@ def create_interface() -> gr.Blocks:
                 with gr.Row(elem_id="attachments-row"):
                     with gr.Column():
                         with gr.Accordion(
-                            "📷 Add Medical Image (optional)", open=False,
+                            "Add Medical Image (optional)", open=False,
                         ):
                             quick_image = gr.Image(
                                 label="Upload a medical photo",
@@ -1288,7 +1469,7 @@ def create_interface() -> gr.Blocks:
                             )
                     with gr.Column():
                         with gr.Accordion(
-                            "💊 Current Medications (optional)", open=False,
+                            "Current Medications (optional)", open=False,
                         ):
                             quick_meds_photo = gr.Image(
                                 label="Upload photo of medications",
@@ -1302,7 +1483,7 @@ def create_interface() -> gr.Blocks:
 
                 # Run button
                 quick_run_btn = gr.Button(
-                    "▶️  Run Complete Workflow",
+                    "Run Complete Workflow",
                     variant="primary",
                     size="lg",
                     elem_id="run-workflow-btn",
@@ -1388,11 +1569,11 @@ def create_interface() -> gr.Blocks:
                     outputs=chat_outputs,
                 )
 
-            with gr.Tab("ℹ️ Architecture & About"):
+            with gr.Tab("Architecture & About"):
               with gr.Group(elem_id="about-content"):
                 gr.Markdown(
                     """
-## 🏗️ System Architecture
+## System Architecture
 
 HealthPost orchestrates **five specialised clinical AI modules** into one seamless workflow:
 
@@ -1406,7 +1587,7 @@ HealthPost orchestrates **five specialised clinical AI modules** into one seamle
 
 ---
 
-### 🎯 Why HealthPost?
+### Why HealthPost?
 
 - **One-click workflow** \u2014 all modules run automatically in sequence
 - **Offline-ready** \u2014 designed for low-connectivity health posts
@@ -1415,7 +1596,7 @@ HealthPost orchestrates **five specialised clinical AI modules** into one seamle
 
 ---
 
-### ⚠️ Important Disclaimer
+### Important Disclaimer
 
 > This tool is a **decision-support system** for Community Health Workers.
 > It does **not** replace professional medical judgment.
@@ -1423,7 +1604,7 @@ HealthPost orchestrates **five specialised clinical AI modules** into one seamle
 
 ---
 
-*Built with ❤️ for the MedGemma Impact Challenge 2025*
+*Built for the MedGemma Impact Challenge 2025*
                     """
                 )
 

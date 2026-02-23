@@ -1,8 +1,7 @@
-"""
-RxNorm API client for drug interaction checking.
+"""RxNorm API client for drug interaction checking.
 
 Uses the free NLM RxNav API to check drug interactions.
-https://lhncbc.nlm.nih.gov/RxNav/APIs/InteractionAPIs.html
+See https://lhncbc.nlm.nih.gov/RxNav/APIs/InteractionAPIs.html.
 """
 
 import json
@@ -22,37 +21,57 @@ RXNORM_BASE = "https://rxnav.nlm.nih.gov/REST"
 
 @dataclass
 class RxNormInteraction:
-    """Drug interaction from RxNorm API."""
+    """A single drug interaction from the RxNorm API.
+
+    Attributes:
+        drug1: First drug name.
+        drug2: Second drug name.
+        severity: Severity level (``"high"``, ``"moderate"``,
+            ``"low"``, or ``"N/A"``).
+        description: Clinical description of the interaction.
+        source: Data source (``"DrugBank"`` or ``"ONCHigh"``).
+    """
+
     drug1: str
     drug2: str
-    severity: str  # "high", "moderate", "low", or "N/A"
+    severity: str
     description: str
-    source: str  # "DrugBank" or "ONCHigh"
+    source: str
 
 
 class RxNormClient:
-    """
-    Client for RxNorm/RxNav Drug Interaction API.
+    """Client for the RxNorm/RxNav Drug Interaction API.
 
-    Free to use, no API key required.
-    Rate limit: 20 requests/second
+    Free to use, no API key required.  Rate limit: 20 requests/second.
+
+    Attributes:
+        base_url: RxNorm REST API base URL.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """Initialize the client with caches and rate-limit state."""
         self.base_url = RXNORM_BASE
         self._rxcui_cache: Dict[str, Optional[str]] = {}
-        self._last_request_time = 0
-        self._min_request_interval = 0.05  # 20 requests/second max
+        self._last_request_time: float = 0
+        self._min_request_interval: float = 0.05  # 20 requests/second max
 
-    def _rate_limit(self):
-        """Ensure we don't exceed rate limits."""
+    def _rate_limit(self) -> None:
+        """Sleep if needed to respect the minimum request interval."""
         elapsed = time.time() - self._last_request_time
         if elapsed < self._min_request_interval:
             time.sleep(self._min_request_interval - elapsed)
         self._last_request_time = time.time()
 
-    def _request(self, endpoint: str, params: Dict = None) -> Optional[Dict]:
-        """Make a request to RxNorm API."""
+    def _request(self, endpoint: str, params: Optional[Dict[str, str]] = None) -> Optional[Dict]:
+        """Perform a rate-limited GET request to the RxNorm API.
+
+        Args:
+            endpoint: Path relative to *base_url*.
+            params: Optional query parameters.
+
+        Returns:
+            Parsed JSON response as a dict, or ``None`` on failure.
+        """
         self._rate_limit()
 
         url = f"{self.base_url}/{endpoint}"
@@ -66,21 +85,20 @@ class RxNormClient:
             with urllib.request.urlopen(req, timeout=10) as response:
                 return json.loads(response.read().decode())
         except urllib.error.URLError as e:
-            logger.warning(f"RxNorm API request failed: {e}")
+            logger.warning("RxNorm API request failed: %s", e)
             return None
         except Exception as e:
-            logger.error(f"RxNorm API error: {e}")
+            logger.error("RxNorm API error: %s", e)
             return None
 
     def get_rxcui(self, drug_name: str) -> Optional[str]:
-        """
-        Get RxCUI (RxNorm Concept Unique Identifier) for a drug name.
+        """Get RxCUI (RxNorm Concept Unique Identifier) for a drug name.
 
         Args:
-            drug_name: Drug name (brand or generic)
+            drug_name: Drug name (brand or generic).
 
         Returns:
-            RxCUI string or None if not found
+            RxCUI string, or ``None`` if not found.
         """
         # Check cache
         cache_key = drug_name.lower()
@@ -111,14 +129,13 @@ class RxNormClient:
         return None
 
     def get_interactions_by_rxcui(self, rxcui: str) -> List[RxNormInteraction]:
-        """
-        Get all known interactions for a drug by RxCUI.
+        """Get all known interactions for a drug by RxCUI.
 
         Args:
-            rxcui: RxNorm Concept Unique Identifier
+            rxcui: RxNorm Concept Unique Identifier.
 
         Returns:
-            List of interactions
+            List of interactions found for this drug.
         """
         data = self._request(f"interaction/interaction.json", {"rxcui": rxcui})
 
@@ -154,14 +171,13 @@ class RxNormClient:
         return interactions
 
     def check_interactions(self, drug_names: List[str]) -> List[RxNormInteraction]:
-        """
-        Check for interactions between a list of drugs.
+        """Check for interactions between a list of drugs.
 
         Args:
-            drug_names: List of drug names to check
+            drug_names: List of drug names to check.
 
         Returns:
-            List of interactions found
+            List of interactions found between the drugs.
         """
         if len(drug_names) < 2:
             return []
@@ -176,10 +192,12 @@ class RxNormClient:
                 rxcuis.append(rxcui)
                 name_map[rxcui] = name
             else:
-                logger.warning(f"Could not find RxCUI for: {name}")
+                logger.warning("Could not find RxCUI for: %s", name)
 
         if len(rxcuis) < 2:
-            logger.warning("Not enough drugs found in RxNorm to check interactions")
+            logger.warning(
+                "Not enough drugs found in RxNorm to check interactions",
+            )
             return []
 
         # Use the list interaction endpoint
@@ -216,14 +234,13 @@ class RxNormClient:
         return interactions
 
     def get_drug_info(self, drug_name: str) -> Optional[Dict]:
-        """
-        Get basic drug information from RxNorm.
+        """Get basic drug information from RxNorm.
 
         Args:
-            drug_name: Drug name
+            drug_name: Drug name (brand or generic).
 
         Returns:
-            Dict with drug info or None
+            Dict with drug info, or ``None`` if not found.
         """
         rxcui = self.get_rxcui(drug_name)
         if not rxcui:
@@ -249,7 +266,7 @@ _client: Optional[RxNormClient] = None
 
 
 def get_rxnorm_client() -> RxNormClient:
-    """Get or create RxNorm client instance."""
+    """Return (and lazily create) the module-level RxNorm client."""
     global _client
     if _client is None:
         _client = RxNormClient()
@@ -257,14 +274,13 @@ def get_rxnorm_client() -> RxNormClient:
 
 
 def check_interactions_online(drug_names: List[str]) -> List[RxNormInteraction]:
-    """
-    Convenience function to check drug interactions via RxNorm API.
+    """Convenience wrapper to check interactions via the RxNorm API.
 
     Args:
-        drug_names: List of drug names
+        drug_names: Drug names to check.
 
     Returns:
-        List of interactions
+        List of interactions found.
     """
     client = get_rxnorm_client()
     return client.check_interactions(drug_names)

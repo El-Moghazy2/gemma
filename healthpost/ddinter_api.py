@@ -154,6 +154,8 @@ class DDInterClient:
             return self._drug_cache[cache_key]
 
         search_term = DRUG_NAME_ALIASES.get(cache_key, drug_name.strip())
+        # DDInter search endpoint requires at least 3 characters;
+        # pad short names with spaces to satisfy the minimum length.
         if len(search_term) < 3:
             search_term = search_term + "   "
 
