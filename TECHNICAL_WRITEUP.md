@@ -10,12 +10,12 @@ Solo project.
 
 ### Problem statement
 
-Community Health Workers (CHWs) serve as the primary — and often only — healthcare providers for approximately **3 billion people** in low- and middle-income countries [WHO, 2018]. During a typical visit, a CHW must act as **both clinician and pharmacist**: assessing symptoms, making a diagnosis, choosing a treatment, and dispensing medication — all without laboratory support or specialist backup.
+Community Health Workers (CHWs) serve as the primary — and often only — healthcare providers for approximately **3 billion people** in low- and middle-income countries [7]. During a typical visit, a CHW must act as **both clinician and pharmacist**: assessing symptoms, making a diagnosis, choosing a treatment, and dispensing medication — all without laboratory support or specialist backup.
 
 This dual role creates compounding failure modes:
 
 - **Diagnostic errors** from limited training and no decision support tools.
-- **Medication errors** — the third leading cause of death globally, responsible for an estimated 2.6 million deaths per year [WHO, 2017].
+- **Medication errors** — the third leading cause of death globally, responsible for an estimated 2.6 million deaths per year [8].
 - **Missed drug interactions** when a patient's existing medications are unknown or not considered.
 - **Delayed referrals** when serious conditions go unrecognized at the health-post level.
 
@@ -166,6 +166,10 @@ HealthPost is designed for low-resource deployment:
 [5] Google Research. "MedGemma and MedASR: Open Models for Health AI." Google Developers Blog, 2025. https://developers.google.com/health-ai-developer-foundations
 
 [6] LangChain, Inc. "LangGraph." GitHub, 2024. https://github.com/langchain-ai/langgraph
+
+[7] World Health Organization. "WHO Guideline on Health Policy and System Support to Optimize Community Health Worker Programmes." WHO, 2018. https://www.who.int/publications/i/item/9789241550369
+
+[8] World Health Organization. "WHO Launches Global Effort to Halve Medication-Related Errors in 5 Years." WHO News, 29 March 2017. https://www.who.int/news/item/29-03-2017-who-launches-global-effort-to-halve-medication-related-errors-in-5-years
 
 ---
 
