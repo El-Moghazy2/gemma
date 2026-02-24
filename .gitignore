@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 venv/
 .claude/
+TECHNICAL_WRITEUP.md
+TECHNICAL_WRITEUP.pdf
