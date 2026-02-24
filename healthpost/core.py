@@ -378,6 +378,50 @@ class HealthPost:
             final_state = self._visit_graph.invoke(visit_state)
         return self._state_to_result(final_state)
 
+    def patient_visit_streaming(
+        self,
+        on_node_done: Callable[[str, Dict[str, Any]], None],
+        symptoms_text: Optional[str] = None,
+        images: Optional[List[Any]] = None,
+        existing_meds_list: Optional[List[str]] = None,
+        patient_age: Optional[str] = None,
+    ) -> PatientVisitResult:
+        """Run the pipeline, calling *on_node_done* after each node.
+
+        Unlike ``patient_visit``, this uses ``graph.stream()`` so the
+        caller can react to intermediate state updates.
+
+        Args:
+            on_node_done: Callback ``(node_name, accumulated_state)``
+                invoked after each graph node completes.
+            symptoms_text: Text description of symptoms.
+            images: Medical images for analysis.
+            existing_meds_list: List of current medication names.
+            patient_age: Patient age description.
+
+        Returns:
+            ``PatientVisitResult`` from the final accumulated state.
+        """
+        self.initialize()
+
+        visit_state: Dict[str, Any] = {
+            "symptoms_text": symptoms_text,
+            "images": images,
+            "existing_meds_list": existing_meds_list,
+            "patient_age": patient_age,
+        }
+
+        from .visit_graph import build_visit_graph
+        graph = build_visit_graph(self)
+
+        accumulated: Dict[str, Any] = dict(visit_state)
+        for event in graph.stream(visit_state):
+            node_name = list(event.keys())[0]
+            accumulated.update(event[node_name])
+            on_node_done(node_name, dict(accumulated))
+
+        return self._state_to_result(accumulated)
+
     def _state_to_result(self, state: Dict[str, Any]) -> PatientVisitResult:
         """Convert a final visit graph state to a ``PatientVisitResult``."""
         return PatientVisitResult(

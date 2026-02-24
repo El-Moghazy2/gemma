@@ -14,6 +14,8 @@ import os
 os.environ["HF_HOME"] = "/data/.huggingface"
 
 import logging
+import queue
+import threading
 from typing import Any, List, Optional, Tuple
 
 import gradio as gr
@@ -591,31 +593,39 @@ def update_interaction_ui(
     )
 
 
-@spaces.GPU(duration=300)
-def _run_pipeline_gpu(
-    symptoms: str,
-    images: List[Any],
-    meds: List[str],
-    age: Optional[str],
-):
-    """GPU-accelerated patient visit pipeline.
+def _make_streaming_pipeline_gpu(q: queue.Queue):
+    """Build a GPU-decorated function that streams pipeline progress.
+
+    The queue is captured by closure so it is NOT passed as an argument
+    to the ``@spaces.GPU`` function (avoids ZeroGPU pickle issues).
 
     Args:
-        symptoms: Patient symptom description.
-        images: List of medical image arrays.
-        meds: Current medication names.
-        age: Patient age description, or ``None``.
+        q: Queue to push ``(node_name, state_snapshot)`` tuples into.
+            A ``None`` sentinel is pushed when the pipeline finishes.
+            Exceptions are pushed as ``Exception`` objects.
 
     Returns:
-        ``PatientVisitResult`` from the complete workflow.
+        A ``@spaces.GPU``-decorated callable.
     """
-    hp = get_healthpost()
-    return hp.patient_visit(
-        symptoms_text=symptoms,
-        images=images,
-        existing_meds_list=meds,
-        patient_age=age,
-    )
+
+    @spaces.GPU(duration=300)
+    def _run(symptoms, images, meds, age):
+        hp = get_healthpost()
+        try:
+            result = hp.patient_visit_streaming(
+                on_node_done=lambda name, state: q.put((name, state)),
+                symptoms_text=symptoms,
+                images=images,
+                existing_meds_list=meds,
+                patient_age=age,
+            )
+            q.put(None)
+            return result
+        except Exception as exc:
+            q.put(exc)
+            raise
+
+    return _run
 
 
 def run_complete_workflow(
@@ -626,7 +636,10 @@ def run_complete_workflow(
     current_meds_photo: Any,
     current_meds_text: str,
 ):
-    """Run the complete patient visit workflow.
+    """Run the complete patient visit workflow with streaming output.
+
+    Each pipeline stage's results are yielded as they complete, so the
+    user sees the report build incrementally.
 
     Args:
         audio: NumPy audio array, or ``None``.
@@ -670,10 +683,50 @@ def run_complete_workflow(
 
         yield "**Running AI analysis...**", None, hide, hide, hide
 
-        result = _run_pipeline_gpu(
-            final_symptoms, images, current_meds,
-            patient_age if patient_age else None,
-        )
+        # Stream pipeline stages via a background thread + queue
+        progress_queue: queue.Queue = queue.Queue()
+        gpu_fn = _make_streaming_pipeline_gpu(progress_queue)
+
+        thread_result: List[Any] = []  # mutable container for thread return
+        thread_error: List[BaseException] = []
+
+        def _target():
+            try:
+                thread_result.append(gpu_fn(
+                    final_symptoms, images, current_meds,
+                    patient_age if patient_age else None,
+                ))
+            except Exception as exc:
+                thread_error.append(exc)
+
+        t = threading.Thread(target=_target, daemon=True)
+        t.start()
+
+        # Poll the queue and yield partial markdown as nodes complete
+        while True:
+            try:
+                item = progress_queue.get(timeout=300)
+            except queue.Empty:
+                raise TimeoutError(
+                    "Pipeline timed out after 300 seconds"
+                )
+
+            if item is None:
+                # Sentinel — pipeline finished
+                break
+            if isinstance(item, Exception):
+                raise item
+
+            node_name, state_snapshot = item
+            md = _format_partial_markdown(state_snapshot, node_name)
+            yield md, None, hide, hide, hide
+
+        t.join(timeout=10)
+
+        if thread_error:
+            raise thread_error[0]
+
+        result = thread_result[0] if thread_result else None
 
         hp = get_healthpost()
         main_output = _format_result_markdown(result, hp)
@@ -743,6 +796,164 @@ def chat_respond(
     conversation_messages.append({"role": "assistant", "content": response})
 
     return chat_history, "", conversation_messages
+
+
+def _format_partial_markdown(state: dict, current_node: str) -> str:
+    """Build an incremental Markdown report from a partial pipeline state.
+
+    Renders only the sections whose data is already available, and
+    appends a progress indicator for the stage currently running.
+
+    Args:
+        state: Accumulated visit state dict from the pipeline.
+        current_node: Name of the node that just completed.
+
+    Returns:
+        Markdown string with completed sections and a progress line.
+    """
+    lines: List[str] = []
+
+    triage_badge = _get_backend_badge("triage")
+    vision_badge = _get_backend_badge("vision")
+    lines.append(f"**Models:** {triage_badge} {vision_badge}\n")
+    lines.append("---\n")
+
+    # After intake: show symptoms
+    symptoms = state.get("symptoms")
+    if symptoms:
+        lines.append(f"**Symptoms captured:** {symptoms}\n")
+
+    # After analyze_images: show visual findings
+    visual_findings = state.get("visual_findings", [])
+    if visual_findings:
+        lines.append("**Visual Findings:**")
+        for f in visual_findings:
+            lines.append(f"- {f}")
+        lines.append("")
+
+    # After diagnose: show diagnosis + treatment plan
+    diagnosis = state.get("diagnosis")
+    if diagnosis:
+        lines.append(f"## Diagnosis: {diagnosis.condition}")
+        lines.append(
+            f"**Confidence:** {diagnosis.confidence:.0%}\n"
+        )
+
+        lines.append("**Evidence:**")
+        if diagnosis.supporting_evidence:
+            for ev in diagnosis.supporting_evidence[:3]:
+                lines.append(f"- {ev}")
+        else:
+            lines.append("- Based on reported symptoms")
+        lines.append("")
+
+        if diagnosis.differential_diagnoses:
+            lines.append(
+                "**Consider also:** "
+                + ", ".join(diagnosis.differential_diagnoses)
+            )
+        lines.append("")
+
+        if diagnosis.known_symptoms:
+            lines.append("**Known symptoms of this condition** *(verify with patient):*")
+            for sym in diagnosis.known_symptoms:
+                lines.append(f"- {sym}")
+            lines.append("")
+
+    treatment = state.get("treatment_plan")
+    if treatment:
+        lines.append("## Treatment Plan")
+        if treatment.medications:
+            for med in treatment.medications:
+                dur = f" for {med.duration}" if med.duration else ""
+                justification = f" \u2014 {med.justification}" if med.justification else ""
+                lines.append(f"- **{med.name}**: {med.dosage}{dur}{justification}")
+        else:
+            lines.append("- Supportive care")
+        lines.append("")
+
+        lines.append("**Instructions:**")
+        if treatment.instructions:
+            for instr in treatment.instructions:
+                lines.append(f"- {instr}")
+        else:
+            lines.append("- Follow healthcare provider guidance")
+        lines.append("")
+
+        lines.append("**Warning Signs (return if):**")
+        if treatment.warning_signs:
+            for w in treatment.warning_signs:
+                lines.append(f"- {w}")
+        else:
+            lines.append("- Seek care if symptoms worsen or new symptoms appear")
+        lines.append("")
+
+    # After check_drugs: show drug interactions
+    drug_interactions = state.get("drug_interactions")
+    if drug_interactions is not None and diagnosis:
+        lines.append("## Drug Safety Check")
+        current_meds = state.get("current_meds", [])
+        all_meds = current_meds + (
+            [m.name for m in treatment.medications] if treatment else []
+        )
+        if all_meds:
+            lines.append(f"*Checked: {', '.join(all_meds)}*\n")
+
+        if drug_interactions:
+            for interaction in drug_interactions:
+                sev = {
+                    "severe": "**SEVERE**",
+                    "moderate": "**MODERATE**",
+                    "mild": "MILD",
+                }.get(interaction.severity, interaction.severity)
+                drug_pair = " + ".join(interaction.drugs)
+                desc = interaction.description
+                lines.append(f"- {sev}: {drug_pair} \u2014 {desc}")
+            lines.append("")
+        else:
+            lines.append("No interactions detected.\n")
+
+    # After find_alternatives: show alternatives
+    alternatives = state.get("alternative_medications", {})
+    if alternatives:
+        lines.append("**Suggested Alternatives:**")
+        for drug, alt in alternatives.items():
+            lines.append(f"- Instead of {drug}: **{alt}**")
+        lines.append("")
+
+    # After assess_safety: show safety and referral
+    if "overall_confidence" in state and diagnosis:
+        is_safe = state.get("is_safe_to_proceed", True)
+        if is_safe:
+            lines.append("### SAFE TO PROCEED")
+        else:
+            lines.append("### DO NOT PROCEED \u2014 Review interactions above")
+        lines.append("")
+
+        if state.get("needs_referral"):
+            lines.append(
+                f"### REFERRAL NEEDED\n"
+                f"**Reason:** {state.get('referral_reason')}"
+            )
+            lines.append("")
+
+        follow_up = treatment.follow_up_days or 3 if treatment else 3
+        lines.append(f"**Follow-up:** {follow_up} days")
+
+    # Progress indicator for the *next* stage
+    next_labels = {
+        "intake": "Analyzing images / extracting medications...",
+        "analyze_images": "Extracting medications...",
+        "extract_meds": "Generating diagnosis and treatment plan...",
+        "diagnose": "Checking drug interactions...",
+        "check_drugs": "Finding alternatives / assessing safety...",
+        "find_alternatives": "Assessing safety and referral needs...",
+    }
+    next_label = next_labels.get(current_node)
+    if next_label:
+        lines.append(f"\n---\n*Processing: {next_label}*")
+
+    return "\n".join(lines)
 
 
 def _format_result_markdown(result: Any, hp: Any) -> str:
