@@ -521,6 +521,9 @@ class HealthPost:
     ) -> Dict[str, str]:
         """Suggest alternatives for recommended drugs with interactions.
 
+        Batches all problematic drugs into a single LLM call instead of
+        making one call per drug.
+
         Args:
             diagnosis: The AI-generated diagnosis.
             treatment: The AI-generated treatment plan.
@@ -530,25 +533,97 @@ class HealthPost:
         Returns:
             Mapping of problematic drug name to suggested alternative.
         """
-        alternatives: Dict[str, str] = {}
         recommended_drugs = {
             m.name.lower(): m.name for m in treatment.medications
         }
 
+        # Collect (rec_name, interaction) pairs that need alternatives.
+        problematic: Dict[str, DrugInteraction] = {}
         for interaction in interactions:
             for drug in interaction.drugs:
                 drug_lower = drug.lower()
                 for rec_key, rec_name in recommended_drugs.items():
                     if drug_lower in rec_key or rec_key in drug_lower:
-                        if rec_name not in alternatives:
-                            alternative = self._suggest_alternative(
-                                diagnosis.condition,
-                                rec_name,
-                                interaction,
-                                current_meds,
-                            )
-                            if alternative:
-                                alternatives[rec_name] = alternative
+                        if rec_name not in problematic:
+                            problematic[rec_name] = interaction
+
+        if not problematic:
+            return {}
+
+        current_str = (
+            ", ".join(current_meds) if current_meds else "None specified"
+        )
+
+        # Build a single prompt listing all problematic drugs.
+        drug_lines: list[str] = []
+        for idx, (drug_name, interaction) in enumerate(
+            problematic.items(), 1,
+        ):
+            drug_lines.append(
+                f'{idx}. "{drug_name}":\n'
+                f'   - Interacts with: {", ".join(interaction.drugs)}\n'
+                f'   - Severity: {interaction.severity}\n'
+                f'   - Description: {interaction.description}'
+            )
+
+        prompt = (
+            f"A patient with {diagnosis.condition} needs treatment.\n"
+            f"Patient's current medications: {current_str}\n\n"
+            f"The following recommended medications have interactions:\n\n"
+            + "\n\n".join(drug_lines)
+            + "\n\n"
+            f"For EACH medication above, suggest ONE alternative that:\n"
+            f"1. Can treat {diagnosis.condition}\n"
+            f"2. Does not interact with the patient's current medications\n"
+            f"3. Is commonly available\n\n"
+            f"Respond with EXACTLY one line per medication, in this format:\n"
+            f"drug_name: alternative_name dosage\n"
+            f"Example:\n"
+            f"Ciprofloxacin: Tobramycin eye drops, 1 drop every 4 hours"
+        )
+
+        alternatives: Dict[str, str] = {}
+
+        try:
+            response = self.triage._generate_response(prompt)
+            logger.info("Batched alternatives response: %s", response)
+            drug_names_lower = {n.lower(): n for n in problematic}
+
+            for line in response.strip().splitlines():
+                line = line.strip()
+                if ":" not in line:
+                    continue
+                key, _, value = line.partition(":")
+                key = key.strip().strip('"').strip("0123456789. ")
+                value = value.strip()
+                if not key or not value:
+                    continue
+                # Fuzzy match the key back to a problematic drug.
+                key_lower = key.lower()
+                for prob_lower, prob_name in drug_names_lower.items():
+                    if key_lower in prob_lower or prob_lower in key_lower:
+                        if prob_name not in alternatives:
+                            if len(value) > 100:
+                                value = value[:100]
+                            alternatives[prob_name] = value
+                        break
+        except Exception as e:
+            logger.warning(
+                "Batched alternative request failed: %s", e,
+            )
+
+        # Fallback: call _suggest_alternative individually for any drug
+        # that wasn't resolved by the batched response.
+        for drug_name, interaction in problematic.items():
+            if drug_name not in alternatives:
+                logger.info(
+                    "Falling back to single call for %s", drug_name,
+                )
+                alt = self._suggest_alternative(
+                    diagnosis.condition, drug_name, interaction, current_meds,
+                )
+                if alt:
+                    alternatives[drug_name] = alt
 
         return alternatives
 
