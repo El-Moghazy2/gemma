@@ -655,7 +655,12 @@ def run_complete_workflow(
         chatbot_visible, input_row_visible)``.
     """
     hide = gr.update(visible=False)
-    yield "**Starting workflow...**", None, hide, hide, hide
+    loading_html = (
+        '<div class="loading-indicator">'
+        '<span class="dot"></span><span class="dot"></span><span class="dot"></span>'
+        '{label}</div>'
+    )
+    yield loading_html.format(label="Starting workflow..."), None, hide, hide, hide
 
     try:
         final_symptoms = symptoms_text.strip()
@@ -681,7 +686,7 @@ def run_complete_workflow(
                 if line:
                     current_meds.append(line)
 
-        yield "**Running AI analysis...**", None, hide, hide, hide
+        yield loading_html.format(label="Running AI analysis..."), None, hide, hide, hide
 
         # Stream pipeline stages via a background thread + queue
         progress_queue: queue.Queue = queue.Queue()
@@ -951,7 +956,14 @@ def _format_partial_markdown(state: dict, current_node: str) -> str:
     }
     next_label = next_labels.get(current_node)
     if next_label:
-        lines.append(f"\n---\n*Processing: {next_label}*")
+        lines.append(
+            f'\n---\n<div class="loading-indicator">'
+            f'<span class="dot"></span>'
+            f'<span class="dot"></span>'
+            f'<span class="dot"></span>'
+            f'{next_label}'
+            f'</div>'
+        )
 
     return "\n".join(lines)
 
@@ -1589,6 +1601,29 @@ textarea:focus, input:focus, .gr-input:focus {
         font-size: 0.85rem !important;
     }
 }
+
+/* ── Loading pulse animation ───────────────────────────────────────────── */
+@keyframes hp-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+.loading-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 0;
+    color: #0066FF;
+    font-weight: 500;
+}
+.loading-indicator .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #0066FF;
+    animation: hp-pulse 1.2s ease-in-out infinite;
+}
+.loading-indicator .dot:nth-child(2) { animation-delay: 0.2s; }
+.loading-indicator .dot:nth-child(3) { animation-delay: 0.4s; }
 """
 
 
